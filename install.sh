@@ -24,7 +24,7 @@ main() {
     exit 1
   fi
   tar -xzf "${WORK}/setup.tar.gz" -C "${WORK}"
-  echo 'Мастер откроется в браузере. Чтобы остановить установщик, нажмите Ctrl+C.'
+  [[ $# -eq 0 ]] && echo 'Мастер откроется в браузере. Чтобы остановить установщик, нажмите Ctrl+C.'
   bash "${WORK}/${name}/Install.command" "$@" </dev/null
 }
 
