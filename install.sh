@@ -4,7 +4,7 @@
 set -euo pipefail
 
 VERSION='1.0.0'
-SHA256='3851c0f0675003c5e43f85a1e0cdd480508fc1c579d5a460e4aade7b9cb0cb3c'
+SHA256='3469fab26c7958848da8454377dae85c2dc3bf9ecc966b590505bb95ff638430'
 REPO='egor-malishevski/dsh-installer'
 
 main() {
