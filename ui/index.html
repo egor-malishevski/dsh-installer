@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <title>DSH Setup — установка</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#panel">К содержимому шага</a>
+
+  <div class="shell">
+    <header class="rail" aria-label="Ход установки">
+      <div class="brand">
+        <span class="brand__mark" aria-hidden="true">D</span>
+        <div>
+          <p class="brand__name">DSH Setup</p>
+          <p class="brand__sub">Установка на этот Mac</p>
+        </div>
+      </div>
+
+      <p class="rail__compact" id="railCompact" aria-hidden="true"></p>
+      <ol class="steps" id="steps"></ol>
+
+      <p class="rail__foot">Мастер работает локально. Введённые ключи хранятся только в памяти этой вкладки.</p>
+    </header>
+
+    <main class="stage">
+      <div class="live" id="live" role="status" aria-live="polite" aria-atomic="true"></div>
+      <section class="panel" id="panel" tabindex="-1" aria-labelledby="panelTitle">
+        <p class="loading">Загрузка…</p>
+      </section>
+    </main>
+  </div>
+
+  <noscript><p class="noscript">Для работы мастера нужен JavaScript.</p></noscript>
+  <script src="core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "commonjs",
+  "description": "DSH Setup UI: статические файлы без сборки. package.json нужен только чтобы тесты и core.js оставались CommonJS."
+}

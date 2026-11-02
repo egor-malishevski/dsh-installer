@@ -1,0 +1,32 @@
+{
+  "name": "dsh-integrations",
+  "version": "1.0.0",
+  "private": true,
+  "description": "8 MCP-серверов и zstd-relay для CLIProxyAPI",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./mcp-client": "./lib/mcp-client.js",
+    "./package.json": "./package.json",
+    "./client": "./client/client.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  }
+}
