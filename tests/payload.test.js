@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process'
 
 const payload = resolve(dirname(fileURLToPath(import.meta.url)), '../payload')
 const script = resolve(dirname(fileURLToPath(import.meta.url)), '../scripts/prepare-payload.js')
-const servers = "const SERVERS = new Set(['mcp-obscura', 'mcp-bitbucket', 'mcp-gitlab', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-sequential-thinking', 'mcp-memory', 'mcp-google-sheets']);"
+const servers = "const SERVERS = new Set(['mcp-obscura', 'mcp-bitbucket', 'mcp-gitlab', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-sequential-thinking', 'mcp-memory', 'mcp-google-sheets', 'mcp-figma', 'mcp-context7']);"
 const clients = "const MODULES = new Set(['@deepseek-ai/dsh-mcp-client', 'dsh-integrations/mcp-client']);"
 function files(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -36,7 +36,7 @@ test('payload contains curated code, package entrypoints and licenses', () => {
   assert.deepEqual(editor.match(/^const MODULES\s*=.*$/gm), [clients])
 })
 
-test('preparation adds GitLab only to the expected editor allowlist', () => {
+test('preparation adds GitLab and Context7 only to the expected editor allowlist', () => {
   const temp = mkdtempSync(join(tmpdir(), 'dsh-payload-test-'))
   try {
     mkdirSync(join(temp, 'scripts'))
@@ -55,7 +55,7 @@ test('preparation adds GitLab only to the expected editor allowlist', () => {
     const editorPath = join(integrations, 'lib/editor.js')
     const original = readFileSync(editorPath, 'utf8')
     const run = () => spawnSync(process.execPath, [join(temp, 'scripts/prepare-payload.js'), '--integrations', integrations, '--slim', slim, '--relay', relay], { encoding: 'utf8' })
-    writeFileSync(editorPath, original.replace(servers, servers.replace("'mcp-bitbucket', 'mcp-gitlab',", "'mcp-bitbucket',")))
+    writeFileSync(editorPath, original.replace(servers, servers.replace("'mcp-bitbucket', 'mcp-gitlab',", "'mcp-bitbucket',").replace(", 'mcp-context7']", "]")))
     let result = run()
     assert.equal(result.status, 0, result.stderr)
     assert.equal(readFileSync(join(temp, 'payload/bundles/dsh-integrations/lib/editor.js'), 'utf8'), original)

@@ -64,7 +64,13 @@ curl -fsSL https://raw.githubusercontent.com/egor-malishevski/dsh-installer/main
 | Explorer | DeepSeek Account / DeepSeek Flash | low |
 | Librarian | CLIProxyAPI / Grok 4.7 | Не задаётся |
 
-Общие разрешения ролей ограничиваются выбранными MCP и конкретными инструментами чтения. Они не создают отдельных подключений. Obscura, Memory, Google Sheets и Sequential Thinking остаются у основной сессии. GitLab настраивается в режиме `readonly`.
+Общие разрешения ролей ограничиваются выбранными MCP и конкретными инструментами чтения. Они не создают отдельных подключений. Designer получает чтение макетов Figma (`get_figma_data`), Explorer и Librarian — поиск документации Context7. Obscura, Memory, Google Sheets и Sequential Thinking остаются у основной сессии. GitLab настраивается в режиме `readonly`.
+
+Для Figma нужен персональный токен Figma. API-ключ Context7 необязателен: без него действуют бесплатные лимиты запросов.
+
+## Веб-поиск через DeepSeek Account
+
+Плагин `web-search-account` включает инструмент `web_search` во всех сессиях, на какой бы модели они ни работали. Поиск идёт через вход в DeepSeek Account внутри Harness, поэтому без входа в аккаунт поиск работать не будет. Загрузка страниц (`web_fetch`) идёт напрямую по HTTP.
 
 ## Что не переносится
 

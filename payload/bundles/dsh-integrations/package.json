@@ -8,6 +8,7 @@
   "exports": {
     ".": "./lib/index.js",
     "./mcp-client": "./lib/mcp-client.js",
+    "./web-search-account": "./lib/web-search-account.js",
     "./package.json": "./package.json",
     "./client": "./client/client.js"
   },

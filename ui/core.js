@@ -137,6 +137,10 @@
     [/^Connect using Google OAuth credentials and a token file\.?$/i, 'Подключение через OAuth-данные Google и файл токена.'],
     [/^Local reasoning tools\.?$/i, 'Локальные инструменты рассуждения.'],
     [/^Sequential thinking$/i, 'Sequential thinking'],
+    [/^API key$/i, 'API-ключ'],
+    [/^Figma personal access token$/i, 'Персональный токен Figma'],
+    [/^Read Figma designs with a personal access token\.?$/i, 'Чтение макетов Figma по персональному токену.'],
+    [/^Up-to-date library documentation\. The API key is optional and raises rate limits\.?$/i, 'Актуальная документация библиотек. API-ключ необязателен, он повышает лимиты запросов.'],
   ];
   function translateCatalog(text) {
     const t = String(text == null ? '' : text).trim();

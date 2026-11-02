@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 const FIELDS = ['command', 'args', 'cwd', 'toolCallTimeoutMs'];
 const MODULES = new Set(['@deepseek-ai/dsh-mcp-client', 'dsh-integrations/mcp-client']);
-const SERVERS = new Set(['mcp-obscura', 'mcp-bitbucket', 'mcp-gitlab', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-sequential-thinking', 'mcp-memory', 'mcp-google-sheets']);
+const SERVERS = new Set(['mcp-obscura', 'mcp-bitbucket', 'mcp-gitlab', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-sequential-thinking', 'mcp-memory', 'mcp-google-sheets', 'mcp-figma', 'mcp-context7']);
 const secret = /(?:token|secret|password|passwd|api[_-]?key|authorization|bearer|credential|private[_-]?key|:\/\/[^\s/]*@|[?&](?:key|auth|signature)=|\$\{|\b[A-Za-z0-9_-]{40,}\b)/i;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const fail = code => { throw Object.assign(new Error(code), { code }); };

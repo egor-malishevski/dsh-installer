@@ -29,6 +29,8 @@ test('installed profile resolves and parses in the packaged host without activat
     { id: 'gitlab', values: { url: 'https://git.example.org', token: 'fake-gitlab-secret' } },
     { id: 'jira', values: { url: 'https://jira.example.org', token: 'fake-jira-secret' } },
     { id: 'memory', values: {} },
+    { id: 'figma', values: { apiKey: 'fake-figma-secret' } },
+    { id: 'context7', values: {} },
   ] };
   const plan = await buildInstallPlan(config, { targetHome: home, relayPort: 19123, runtimePaths: { npx: '/usr/bin/true', uvx: '/usr/bin/true', nodeVersion: '24.0.0', npxPath: '/usr/bin:/bin' } });
   assert.ok(!plan.requirements.some(r => r.startsWith('BLOCKER:')));
@@ -48,7 +50,9 @@ test('installed profile resolves and parses in the packaged host without activat
   const patches = boot.readProfilePatches('test', { dir, home: dshHome, patchPath: path.join(dir, 'cordis.patch.yml'), installAnchor: anchor, overlays: [] }, profile);
   const integration = profile.layers.find(layer => layer.packageName === 'dsh-integrations');
   const rows = integration.patches.flatMap(p => p.insert || []);
-  assert.deepEqual(rows.filter(r => r.id.startsWith('mcp-')).map(r => r.id), ['mcp-gitlab', 'mcp-jira', 'mcp-memory']);
+  assert.deepEqual(rows.filter(r => r.id.startsWith('mcp-')).map(r => r.id), ['mcp-gitlab', 'mcp-jira', 'mcp-memory', 'mcp-figma', 'mcp-context7']);
+  assert.ok(rows.some(r => r.id === 'web-search-account' && r.name === 'dsh-integrations/web-search-account'));
+  assert.equal(typeof rows.find(r => r.id === 'mcp-figma').config.env.FIGMA_API_KEY.__jsExpr, 'string');
   for (const id of ['gitlab', 'jira']) {
     const env = rows.find(r => r.id === `mcp-${id}`).config.env;
     assert.equal(typeof env[id === 'gitlab' ? 'GITLAB_PERSONAL_ACCESS_TOKEN' : 'JIRA_PERSONAL_TOKEN'].__jsExpr, 'string');
@@ -58,14 +62,14 @@ test('installed profile resolves and parses in the packaged host without activat
   assert.deepEqual(slim.orchestrator, { effort: 'high' });
   assert.deepEqual(slim.roles, {
     oracle: { provider: 'cliproxy', model: 'gpt-6.1-sol', effort: 'high', sharedMcpTools: [...gitlabGrants.oracle, 'mcp__jira__jira_get_issue', 'mcp__jira__jira_search'] },
-    designer: { provider: 'cliproxy', model: 'claude-sonnet-5-5', effort: 'medium', sharedMcpTools: ['mcp__jira__jira_get_issue', 'mcp__jira__jira_search'] },
+    designer: { provider: 'cliproxy', model: 'claude-sonnet-5-5', effort: 'medium', sharedMcpTools: ['mcp__jira__jira_get_issue', 'mcp__jira__jira_search', 'mcp__figma__get_figma_data'] },
     fixer: { provider: 'cliproxy', model: 'claude-sonnet-5-5', effort: 'medium', sharedMcpTools: [...gitlabGrants.fixer, 'mcp__jira__jira_get_issue', 'mcp__jira__jira_search'] },
-    explorer: { provider: 'deepseek-account', model: 'deepseek-flash', effort: 'low' },
-    librarian: { provider: 'cliproxy', model: 'grok-4.7', sharedMcpTools: [...gitlabGrants.librarian] },
+    explorer: { provider: 'deepseek-account', model: 'deepseek-flash', effort: 'low', sharedMcpTools: ['mcp__context7__resolve-library-id', 'mcp__context7__query-docs'] },
+    librarian: { provider: 'cliproxy', model: 'grok-4.7', sharedMcpTools: [...gitlabGrants.librarian, 'mcp__context7__resolve-library-id', 'mcp__context7__query-docs'] },
   });
   const patchPath = path.join(integrationDir, 'cordis.patch.yml');
   const publicText = (await readFile(patchPath, 'utf8')) + (await readFile(path.join(dir, 'cordis.patch.yml'), 'utf8'));
-  for (const [file, token] of [['cliproxy-key', config.apiKey], ['gitlab-token', config.mcps[0].values.token], ['jira-token', config.mcps[1].values.token]]) {
+  for (const [file, token] of [['cliproxy-key', config.apiKey], ['gitlab-token', config.mcps[0].values.token], ['jira-token', config.mcps[1].values.token], ['figma-api-key', config.mcps[3].values.apiKey]]) {
     const secretPath = path.join(dshHome, 'secrets/installer', file);
     assert.equal(await readFile(secretPath, 'utf8'), token + '\n');
     assert.equal((await stat(secretPath)).mode & 0o777, 0o600);
@@ -73,7 +77,7 @@ test('installed profile resolves and parses in the packaged host without activat
   }
   const { createEditor } = await import(url(path.join(integrationDir, 'lib/editor.js')));
   const editor = createEditor({ path: patchPath, recoveryDir: path.join(home, 'recovery'), yaml, atomic, getHmr: () => undefined, isActive: () => false });
-  assert.deepEqual(await editor.statusRows(), [{ id: 'mcp-gitlab', serverName: 'gitlab' }, { id: 'mcp-jira', serverName: 'jira' }, { id: 'mcp-memory', serverName: 'memory' }]);
+  assert.deepEqual(await editor.statusRows(), [{ id: 'mcp-gitlab', serverName: 'gitlab' }, { id: 'mcp-jira', serverName: 'jira' }, { id: 'mcp-memory', serverName: 'memory' }, { id: 'mcp-figma', serverName: 'figma' }, { id: 'mcp-context7', serverName: 'context7' }]);
   const description = await editor.describe();
   assert.equal(description.ok, true);
   assert.equal(description.canSave, false);
@@ -95,6 +99,9 @@ test('installed profile resolves and parses in the packaged host without activat
   assert.equal(observed.value.entries.find(row => row.id === 'mcp-gitlab').state, 'connected');
   statusModule.dispose('mcp-gitlab', statusToken);
   const slimModule = await import(url(path.join(slimDir, 'lib/index.js')));
+  const webSearch = await import(url(path.join(integrationDir, 'lib/web-search-account.js')));
+  assert.equal(webSearch.PROVIDER_ID, 'deepseek-account-search');
+  assert.deepEqual(webSearch.inject, ['web']);
   assert.equal(typeof adapter.apply, 'function');
   assert.equal(typeof integrationModule.apply, 'function');
   assert.ok(slimModule.Config);

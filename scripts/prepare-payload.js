@@ -16,7 +16,7 @@ if (Object.keys(sources).length !== 3) throw new Error('All three source paths a
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const destination = join(root, 'payload')
 const staging = mkdtempSync(join(root, '.payload-stage-'))
-const excluded = /^(?:\.git|node_modules|tests?|__tests__|profiles?|secrets?|data|sessions?|backups?|logs?|\.env(?:\..*)?|package-lock\.json|npm-shrinkwrap\.json)$/i
+const excluded = /^(?:\.git|node_modules|tests?|__tests__|profiles?|secrets?|data|sessions?|backups?|logs?|\.env(?:\..*)?|package-lock\.json|npm-shrinkwrap\.json|.*\.bak(?:-.*)?|\.DS_Store)$/i
 
 function copy(source, target, required = true) {
   if (!existsSync(source)) {
@@ -38,11 +38,11 @@ try {
   for (const item of ['package.json', 'lib', 'client']) copy(join(sources['--integrations'], item), join(integrations, item))
   const editorPath = join(integrations, 'lib/editor.js')
   const editor = readFileSync(editorPath, 'utf8')
-  const originalServers = "const SERVERS = new Set(['mcp-obscura', 'mcp-bitbucket', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-sequential-thinking', 'mcp-memory', 'mcp-google-sheets']);"
-  const gitlabServers = originalServers.replace("'mcp-bitbucket',", "'mcp-bitbucket', 'mcp-gitlab',")
+  const sourceServers = "const SERVERS = new Set(['mcp-obscura', 'mcp-bitbucket', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-sequential-thinking', 'mcp-memory', 'mcp-google-sheets', 'mcp-figma']);"
+  const installerServers = sourceServers.replace("'mcp-bitbucket',", "'mcp-bitbucket', 'mcp-gitlab',").replace("'mcp-figma']", "'mcp-figma', 'mcp-context7']")
   const declarations = editor.match(/^const SERVERS\s*=.*$/gm) || []
-  if (declarations.length !== 1 || ![originalServers, gitlabServers].includes(declarations[0])) throw new Error('Unexpected integrations editor server allowlist')
-  if (declarations[0] === originalServers) writeFileSync(editorPath, editor.replace(originalServers, gitlabServers))
+  if (declarations.length !== 1 || ![sourceServers, installerServers].includes(declarations[0])) throw new Error('Unexpected integrations editor server allowlist')
+  if (declarations[0] === sourceServers) writeFileSync(editorPath, editor.replace(sourceServers, installerServers))
   for (const item of ['LICENSE', 'README.md', 'NOTICE', 'NOTICE.md']) copy(join(sources['--integrations'], item), join(integrations, item), false)
   for (const item of ['package.json', 'lib', 'preset', 'client', 'cordis.patch.yml', 'LICENSE']) copy(join(sources['--slim'], item), join(slim, item))
   for (const item of ['README.md', 'NOTICE', 'NOTICE.md']) copy(join(sources['--slim'], item), join(slim, item), false)

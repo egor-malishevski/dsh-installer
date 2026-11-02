@@ -17,6 +17,9 @@ test('plan includes curated files and protects credentials', async () => {
   assert.equal(JSON.parse(patch.replace(/!!js ("(?:\\.|[^"\\])*")/g, '$1'))[0].insert[0].config.port, 19123);
   assert.match(plan.files.find(file => file.path === '.dsh/profiles/desktop/cordis.patch.yml').content, /127\.0\.0\.1:19123\/v1/);
   assert.equal(plan.files.filter(file => file.type === 'symlink').length, 2);
+  const ops = JSON.parse(patch.replace(/!!js ("(?:\\.|[^"\\])*")/g, '$1'));
+  assert.deepEqual(ops[1], { insert: [{ id: 'web-search-account', name: 'dsh-integrations/web-search-account' }] });
+  assert.deepEqual(ops[2], { id: 'web', name: '@deepseek-ai/dsh-web', config: { searchProvider: 'deepseek-account-search', fetchProvider: 'http' } });
 });
 
 test('rejects relative home and blocks missing selected executable', async () => {
