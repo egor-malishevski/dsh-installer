@@ -15,13 +15,15 @@ async function fixture(t) {
   const pkg = join(dir, 'src/dsh-installer-9.9.9');
   await mkdir(pkg, { recursive: true });
   await writeFile(join(pkg, 'Install.command'), '#!/bin/bash\necho "ran $*"\n');
+  await mkdir(join(dir, 'Apps/DeepSeek Harness.app/Contents'), { recursive: true });
+  await writeFile(join(dir, 'Apps/DeepSeek Harness.app/Contents/Info.plist'), '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>0.2.1-rc.5</string></dict></plist>');
   const tarball = join(dir, 'setup.tar.gz');
   assert.equal(spawnSync('tar', ['-czf', tarball, '-C', join(dir, 'src'), 'dsh-installer-9.9.9']).status, 0);
   const sha = createHash('sha256').update(await readFile(tarball)).digest('hex');
   const run = async (sha256, args = [], env = {}) => {
     const file = join(dir, 'install.sh');
     await writeFile(file, source.replace(/^SHA256=.*/m, `SHA256='${sha256}'`));
-    return spawnSync('bash', [file, ...args], { encoding: 'utf8', env: { ...process.env, DSH_INSTALLER_URL: 'file://' + tarball, TMPDIR: dir + '/', ...env } });
+    return spawnSync('bash', [file, ...args], { encoding: 'utf8', env: { ...process.env, DSH_INSTALLER_URL: 'file://' + tarball, TMPDIR: dir + '/', DSH_HARNESS_APP: join(dir, 'Apps/DeepSeek Harness.app'), ...env } });
   };
   return { dir, sha, run };
 }
@@ -60,4 +62,34 @@ test('install.sh removes its temporary directory after the run', async t => {
   await run(sha);
   const left = spawnSync('find', [dir, '-maxdepth', '1', '-name', 'dsh-setup.*'], { encoding: 'utf8' }).stdout.trim();
   assert.equal(left, '');
+});
+
+test('install.sh warns about an unsupported Harness version and leaves the app alone', async t => {
+  const { dir, sha, run } = await fixture(t);
+  const plist = join(dir, 'Apps/DeepSeek Harness.app/Contents/Info.plist');
+  await writeFile(plist, (await readFile(plist, 'utf8')).replace('0.2.1-rc.5', '0.2.2'));
+  const result = await run(sha);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /установлен DeepSeek Harness 0\.2\.2/);
+  assert.match(await readFile(plist, 'utf8'), /0\.2\.2/);
+});
+
+test('install.sh refuses a Harness download whose SHA-512 does not match', async t => {
+  const { dir, sha, run } = await fixture(t);
+  await rm(join(dir, 'Apps/DeepSeek Harness.app'), { recursive: true });
+  const zip = join(dir, 'fake.zip');
+  await writeFile(zip, 'not the real harness');
+  const result = await run(sha, [], { DSH_HARNESS_URL: 'file://' + zip });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Контрольная сумма DeepSeek Harness/);
+  assert.doesNotMatch(result.stdout, /ran/);
+  assert.equal(spawnSync('test', ['-e', join(dir, 'Apps/DeepSeek Harness.app')]).status, 1);
+});
+
+test('install.sh --check never downloads Harness', async t => {
+  const { dir, sha, run } = await fixture(t);
+  await rm(join(dir, 'Apps/DeepSeek Harness.app'), { recursive: true });
+  const result = await run(sha, ['--check'], { DSH_HARNESS_URL: 'file:///nonexistent.zip' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout + result.stderr, /Harness не найден/);
 });
