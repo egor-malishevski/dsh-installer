@@ -35,7 +35,7 @@ test('HTTP clean install commits payload without exposing the key, and refuses a
   assert.equal(await readFile(join(home, '.dsh/secrets/installer/cliproxy-key'), 'utf8'), config.apiKey + '\n');
 });
 
-test('port occupied after validation blocks install without writes', async t => {
+test('port occupied after validation selects a consistent replacement', async t => {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh-integration-')));
   const instance = createServer({ home, token: 'test-capability', inspectEnvironmentFn: async () => ({ ok: true, blockers: [], checks: [], runtimePaths: {} }), assertStoppedFn: async () => ({ ok: true }) });
   await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
@@ -45,7 +45,13 @@ test('port occupied after validation blocks install without writes', async t => 
   const preview = await (await fetch(instance.origin + '/api/validate', options)).json();
   await new Promise((resolve, reject) => occupant.once('error', reject).listen(preview.preview.relayPort, '127.0.0.1', resolve));
   const response = await fetch(instance.origin + '/api/install', options);
-  assert.equal(response.status, 409);
-  assert.equal((await response.json()).code, 'PREFLIGHT_FAILED');
-  await assert.rejects(readFile(join(home, '.dsh/secrets/installer/cliproxy-key')), { code: 'ENOENT' });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.notEqual(result.relayPort, preview.preview.relayPort);
+  assert.ok(Number.isInteger(result.relayPort) && result.relayPort > 0);
+  const patch = JSON.parse(await readFile(join(home, '.dsh/bundles/dsh-integrations/cordis.patch.yml'), 'utf8'));
+  assert.equal(patch[0].insert[0].config.port, result.relayPort);
+  const profile = await readFile(join(home, '.dsh/profiles/desktop/cordis.patch.yml'), 'utf8');
+  assert.ok(profile.includes(`127.0.0.1:${result.relayPort}/v1`));
+  assert.equal(await readFile(join(home, '.dsh/secrets/installer/cliproxy-key'), 'utf8'), 'private-test-secret\n');
 });
