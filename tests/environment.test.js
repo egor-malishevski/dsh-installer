@@ -28,10 +28,25 @@ test('rejects wrong app identity and old bundled node', async () => {
 
 test('checks target processes without exposing process environments', async () => {
   const app = '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness';
-  const rows = [`node main-host.js DSH_HOME=/other SECRET=do-not-leak`, `${app} DSH_HOME=/other`];
+  const rows = [`101 node main-host.js DSH_HOME=/other SECRET=do-not-leak`, `102 ${app} DSH_HOME=/other`];
   assert.equal((await assertStopped('/home/me/.dsh', { home: '/home/me', listProcesses: async () => rows })).ok, true);
-  const result = await assertStopped('/home/me/.dsh', { home: '/home/me', listProcesses: async () => [`${app} SECRET=do-not-leak`, 'node main-host.js'] });
+  const result = await assertStopped('/home/me/.dsh', { home: '/home/me', listProcesses: async () => [`101 ${app} SECRET=do-not-leak`, '102 node main-host.js'] });
   assert.equal(result.ok, false);
   assert.ok(!JSON.stringify(result).includes('do-not-leak'));
   assert.equal((await assertStopped('/home/me/.dsh', { listProcesses: async () => { throw new Error('secret'); } })).ok, false);
+});
+
+test('ignores only installer PID and fails closed on malformed process rows', async () => {
+  const command = '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness --expose-internals server.js';
+  const options = { home: '/home/me', ownPid: 123 };
+  const check = rows => assertStopped('/home/me/.dsh', { ...options, listProcesses: async () => rows });
+  assert.equal((await check([`123 ${command}`])).ok, true);
+  assert.equal((await check([`123 ${command}`, `124 ${command}`])).ok, false);
+  assert.equal((await check([`123 ${command}`, '124 node main-host.js'])).ok, false);
+  assert.equal((await check([`123 ${command}`, `124 ${command} DSH_HOME=/other`])).ok, true);
+  for (const rows of [[], ['broken SECRET=do-not-leak'], [null], ['0 node'], [`123 ${command}`, 'invalid']]) {
+    const result = await check(rows);
+    assert.equal(result.ok, false);
+    assert.ok(!JSON.stringify(result).includes('SECRET'));
+  }
 });
