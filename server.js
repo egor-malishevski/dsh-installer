@@ -41,17 +41,38 @@ export function createServer({ token = randomBytes(32).toString('hex'), uiRoot =
         const config = input.config ?? input;
         validateConfig(config);
         const checks = await inspect();
-        const port = await relayPort();
-        const plan = await buildInstallPlan(config, { targetHome: home, runtimePaths: checks.runtimePaths, relayPort: port });
+        let port = await relayPort();
+        let plan = await buildInstallPlan(config, { targetHome: home, runtimePaths: checks.runtimePaths, relayPort: port });
         const blockers = [...(checks.blockers || []), ...plan.requirements.filter(r => typeof r === 'string' && r.startsWith('BLOCKER:'))];
         const warnings = [...(checks.warnings || []), ...plan.requirements.filter(r => typeof r === 'string' && !r.startsWith('BLOCKER:'))];
         if (pathname === '/api/validate') return send(res, 200, { ok: true, apiUrl: plan.apiUrl, environment: publicEnvironment(checks), blockers, warnings, preview: { fileCount: plan.files.length, relayPort: port }, message: 'Configuration is structurally valid. No network request was made.' });
         if (blockers.length || checks.ok === false) return send(res, 409, { ok: false, code: 'PREFLIGHT_FAILED', error: 'Installation prerequisites are not satisfied.', blockers });
-        await installPlan(plan, { checkEnvironment: async () => { const current = await inspect(); try { await probeRelayPort(port); } catch { return { ok: false }; } return { ok: current.ok !== false && !(current.blockers || []).length }; }, checkStopped: () => assertStoppedFn(resolve(home, '.dsh'), { home }), afterWrite });
-        return send(res, 200, { ok: true, profilePath: resolve(home, '.dsh/profiles/desktop'), backupPath: null, rollback: { instructions: 'Remove the installed profile and installer files only after confirming they are no longer needed.' }, warnings });
+        // Retry only a port collision, after installPlan has cleaned up its stage and lock.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await installPlan(plan, { checkEnvironment: async () => {
+              const current = await inspect();
+              const currentPlan = await buildInstallPlan(config, { targetHome: home, runtimePaths: current.runtimePaths, relayPort: port });
+              const currentBlockers = [...(current.blockers || []), ...currentPlan.requirements.filter(r => typeof r === 'string' && r.startsWith('BLOCKER:'))];
+              if (current.ok === false || currentBlockers.length) return { ok: false, blockers: currentBlockers };
+              if (JSON.stringify(current.runtimePaths || {}) !== JSON.stringify(checks.runtimePaths || {})) return { ok: false, blockers: ['Runtime environment changed during installation. Please retry.'] };
+              try { await probeRelayPort(port); } catch (error) {
+                return { ok: false, blockers: [`Relay port ${port} is unavailable.`], relayPortOccupied: error?.code === 'EADDRINUSE' };
+              }
+              return { ok: true };
+            }, checkStopped: () => assertStoppedFn(resolve(home, '.dsh'), { home }), afterWrite });
+            break;
+          } catch (error) {
+            if (!error.relayPortOccupied || attempt >= 4) throw error;
+            port = await probeRelayPort();
+            relayPortPromise = Promise.resolve(port);
+            plan = await buildInstallPlan(config, { targetHome: home, runtimePaths: checks.runtimePaths, relayPort: port });
+          }
+        }
+        return send(res, 200, { ok: true, profilePath: resolve(home, '.dsh/profiles/desktop'), relayPort: port, backupPath: null, rollback: { instructions: 'Remove the installed profile and installer files only after confirming they are no longer needed.' }, warnings });
       } catch (error) {
         const codes = new Set(['INVALID_PLAN', 'UNSAFE_PATH', 'EXISTING_PROFILE', 'EXISTING_FILE', 'LOCKED', 'PREFLIGHT_FAILED', 'ROLLBACK_FAILED', 'INSTALL_FAILED']);
-        if (codes.has(error?.code)) return send(res, 409, { ok: false, code: error.code, error: 'Installation could not be completed.' });
+        if (codes.has(error?.code)) return send(res, 409, { ok: false, code: error.code, error: 'Installation could not be completed.', ...(error.code === 'PREFLIGHT_FAILED' ? { blockers: error.blockers || [] } : {}) });
         return send(res, 400, { ok: false, error: error instanceof SyntaxError ? 'Invalid JSON' : 'Invalid configuration or installation plan.' });
       }
     }
