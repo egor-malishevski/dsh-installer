@@ -60,7 +60,7 @@ async function setup(t, envOptions) {
   const { createServer } = await import('../../server.js');
   const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-ui-e2e-')));
   const token = 'e2e-capability-' + Math.random().toString(16).slice(2);
-  const inst = createServer({ home, token, inspectEnvironmentFn: fakeEnvironment(envOptions), assertStoppedFn: async () => ({ ok: true }) });
+  const inst = createServer({ home, token, inspectEnvironmentFn: fakeEnvironment(envOptions), assertStoppedFn: async () => ({ ok: true }), discoveryModelsFn: async () => [{ id: 'claude-opus-5-5', name: 'Claude', input: ['text', 'image'], reasoningEfforts: ['low', 'medium', 'high'] }] });
   await new Promise((resolve) => inst.server.listen(0, '127.0.0.1', resolve));
   const browser = await launch();
   t.after(async () => {
@@ -83,6 +83,8 @@ async function toReview(page, ctx, { gitlab = false, jira = false } = {}) {
   await page.click('#btn-next');
   await page.fill('#apiUrl', 'https://proxy.example.test');
   await page.fill('#apiKey', API_KEY);
+  await page.click('#btn-validate');
+  await page.waitForSelector('#validation-status .callout--ok');
   await page.click('#btn-next');
   await page.waitForSelector('#mcp-counter');
   assert.equal(await page.locator('input[type=checkbox]:checked').count(), 0, 'по умолчанию MCP не выбраны');

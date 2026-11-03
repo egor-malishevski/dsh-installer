@@ -29,7 +29,7 @@ test('generates fresh profile with exact routes and scoped shared grants', () =>
   const slim = rows.find(row => row.id === 'oh-my-dsh-slim').config;
   assert.deepEqual(slim.orchestrator, { effort: 'high' });
   assert.deepEqual(slim.roles.oracle.sharedMcpTools, ['mcp__jira__jira_get_issue']);
-  assert.equal(slim.roles.explorer.provider, 'deepseek-account');
+  assert.equal(slim.roles.explorer.provider, 'cliproxy');
   assert.equal(slim.roles.librarian.effort, undefined);
   assert.equal(slim.roles.observer, undefined);
 });

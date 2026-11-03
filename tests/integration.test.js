@@ -6,10 +6,12 @@ import { join } from 'node:path';
 import { createServer as createNetServer } from 'node:net';
 import { createServer } from '../server.js';
 import { roles } from '../lib/config.js';
+import { models } from '../lib/profile.js';
+const discoveryModelsFn = async () => models.map(m => ({ ...m, ...(m.reasoningEfforts ? { reasoningEfforts: Object.keys(m.reasoningEfforts) } : {}) }));
 
 test('HTTP clean install commits payload without exposing the key, and refuses a retry', async t => {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh-integration-')));
-  const instance = createServer({ home, token: 'test-capability', inspectEnvironmentFn: async () => ({ ok: true, blockers: [], warnings: [], checks: [], runtimePaths: {} }), assertStoppedFn: async () => ({ ok: true }) });
+  const instance = createServer({ home, discoveryModelsFn, token: 'test-capability', inspectEnvironmentFn: async () => ({ ok: true, blockers: [], warnings: [], checks: [], runtimePaths: {} }), assertStoppedFn: async () => ({ ok: true }) });
   await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => instance.server.close(resolve)); await rm(home, { recursive: true, force: true }); });
   const headers = { 'x-dsh-setup-token': instance.token, 'content-type': 'application/json' };
@@ -37,7 +39,7 @@ test('HTTP clean install commits payload without exposing the key, and refuses a
 
 test('port occupied after validation selects a consistent replacement', async t => {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh-integration-')));
-  const instance = createServer({ home, token: 'test-capability', inspectEnvironmentFn: async () => ({ ok: true, blockers: [], checks: [], runtimePaths: {} }), assertStoppedFn: async () => ({ ok: true }) });
+  const instance = createServer({ home, discoveryModelsFn, token: 'test-capability', inspectEnvironmentFn: async () => ({ ok: true, blockers: [], checks: [], runtimePaths: {} }), assertStoppedFn: async () => ({ ok: true }) });
   await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
   const occupant = createNetServer();
   t.after(async () => { if (occupant.listening) await new Promise(resolve => occupant.close(resolve)); await new Promise(resolve => instance.server.close(resolve)); await rm(home, { recursive: true, force: true }); });

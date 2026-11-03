@@ -104,12 +104,12 @@ test('окружение: checks → блокировки и строки на �
   assert.deepEqual(C.installBlockers({ ok: true, checks: [{ id: 'app', ok: true, message: 'x' }] }), []);
 });
 
-test('effort по модели и общий запасной набор', () => {
+test('effort только из метаданных модели', () => {
   const e = C.normalizeEfforts({ efforts: { 'a/b': ['low', 'high'] }, models: [{ id: 'c/d', efforts: ['medium'] }] }, {});
   assert.deepEqual(C.effortsFor('a/b', e).list, ['low', 'high']);
   assert.deepEqual(C.effortsFor('c/d', e).list, ['medium']);
   assert.equal(C.effortsFor('zzz', e, ['x']).specific, false);
-  assert.deepEqual(C.effortsFor('zzz', e, ['x']).list, ['x']);
+  assert.deepEqual(C.effortsFor('zzz', e, ['x']).list, []);
 });
 
 test('требования MCP: статус из checks, только https-ссылки', () => {
@@ -160,7 +160,7 @@ test('buildConfig: модель роутера и effort main уходят пу�
 test('effort: Grok без уровней, данные сервера важнее, смена модели сбрасывает', () => {
   const none = C.normalizeEfforts({}, {});
   assert.equal(C.effortsFor('cliproxy/grok-4.7', none, ['low']).none, true);
-  assert.equal(C.effortsFor('cliproxy/claude-x', none, ['low']).none, false);
+  assert.equal(C.effortsFor('cliproxy/claude-x', none, ['low']).none, true);
   // сервер явно прислал уровни для модели — запасное правило не применяется
   const withServer = C.normalizeEfforts({ efforts: { 'cliproxy/grok-9': ['low'] } }, {});
   assert.deepEqual(C.effortsFor('cliproxy/grok-9', withServer).list, ['low']);
@@ -169,7 +169,7 @@ test('effort: Grok без уровней, данные сервера важне
 
   const r1 = C.reconcileEffort('cliproxy/grok-4.7', 'medium', none, ['low', 'medium', 'high']);
   assert.deepEqual(r1, { effort: '', reset: true, previous: 'medium', none: true });
-  assert.equal(C.reconcileEffort('cliproxy/claude-x', 'medium', none, ['low', 'medium', 'high']).reset, false);
+  assert.equal(C.reconcileEffort('cliproxy/claude-x', 'medium', none, ['low', 'medium', 'high']).reset, true);
   assert.equal(C.reconcileEffort('cliproxy/claude-x', 'xhigh', none, ['low', 'medium', 'high']).reset, true);
   assert.equal(C.reconcileEffort('anything', '', none).reset, false);
 });

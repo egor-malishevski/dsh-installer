@@ -200,6 +200,9 @@
     INVALID_PLAN: 'Установщик не смог собрать безопасный план из этих настроек. Проверьте введённые значения.',
     ROLLBACK_FAILED: 'Установка не удалась, и откат не завершился полностью. Проверьте папку ~/.dsh вручную.',
     INSTALL_FAILED: 'Установка не удалась. Сервер откатил изменения.',
+    MODEL_UNAVAILABLE: 'Список моделей изменился. Вернитесь к CLIProxyAPI, нажмите «Проверить настройки» и проверьте роли.',
+    MODEL_DISCOVERY_FAILED: 'Не удалось получить список моделей CLIProxyAPI. Проверьте адрес и ключ и повторите проверку.',
+    NO_MODELS: 'CLIProxyAPI не вернул моделей. Добавьте модель и повторите проверку.',
   };
 
   /**
@@ -341,8 +344,7 @@
       return { list, specific: true, none: list.length === 0 };
     }
     if (NO_EFFORT_MODEL.test(m)) return { list: [], specific: false, none: true };
-    const base = efforts && efforts.list && efforts.list.length ? efforts.list : fallback || [];
-    return { list: base.slice(), specific: false, none: false };
+    return { list: [], specific: false, none: true };
   }
 
   /** Совместим ли выбранный effort с моделью. Если нет — вернёт effort '' и reset: true. */

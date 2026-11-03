@@ -81,17 +81,32 @@ function createServer(opts) {
         }
         if (url.pathname === '/api/validate') {
           if (!o.validateOk) return send(400, { ok: false, error: 'Ключ отклонён: ' + JSON.parse(body).apiKey });
-          // Форма как в server.js: blockers бывают и при ok:true.
-          return send(200, {
-            ok: true, apiUrl: JSON.parse(body).apiUrl + '/v1',
-            environment: env(o),
-            blockers: o.validateBlockers || [],
-            warnings: o.validateWarnings || [],
-            preview: { fileCount: 7, relayPort: 41234 },
-            message: 'Configuration is structurally valid. No network request was made.',
-          });
+          const models = o.discoveryModels || [
+            { id: 'test-main-model', reasoningEfforts: ['low', 'high'] },
+            { id: 'test-oracle-model', reasoningEfforts: ['low', 'medium', 'high'] },
+            { id: 'test-mid-model', reasoningEfforts: ['low', 'medium', 'high'] },
+            { id: 'test-deepseek-flash', reasoningEfforts: ['low'] },
+            { id: 'test-no-effort-model', reasoningEfforts: [] },
+            { id: 'grok-4.7', reasoningEfforts: [] },
+          ];
+          if (!models.length) return send(409, { ok: false, code: 'NO_MODELS', error: 'No models' });
+          const incoming = JSON.parse(body).roles || {};
+          const roles = {};
+          for (const [key, def] of Object.entries(defaults(o).roles)) {
+            const current = incoming[key] || def;
+            const id = String(current.model || '').replace(/^cliproxy\//, '');
+            const match = models.find((m) => m.id === id) || models[0];
+            const effort = (match.reasoningEfforts || []).includes(current.effort) ? current.effort : '';
+            roles[key] = { model: key === 'orchestrator' ? '' : 'cliproxy/' + match.id, effort: key === 'main' ? '' : effort };
+          }
+          const mainModel = models.find((m) => 'cliproxy/' + m.id === roles.main.model);
+          if (!(mainModel.reasoningEfforts || []).includes(roles.orchestrator.effort)) roles.orchestrator.effort = '';
+          return send(200, { ok: true, discovery: 'ok', networkChecked: true, models, roles,
+            apiUrl: JSON.parse(body).apiUrl + '/v1', environment: env(o),
+            blockers: o.validateBlockers || [], warnings: o.validateWarnings || [], preview: { fileCount: 7 } });
         }
         if (url.pathname === '/api/install') {
+          if (o.installModelUnavailable) return send(409, { ok: false, code: 'MODEL_UNAVAILABLE', error: 'Model unavailable' });
           if (!o.installOk) return send(o.installStatus, { ok: false, code: 'harness_running', error: 'Quit DeepSeek Harness before installation.' });
           if (o.preflightFail) return send(409, { ok: false, code: 'PREFLIGHT_FAILED', error: 'Installation prerequisites are not satisfied.', blockers: ['BLOCKER: Native profile generation is not implemented.'] });
           // Форма успеха как в server.js: backupPath: null, rollback.instructions.

@@ -9,10 +9,11 @@ import { inspectEnvironment as defaultInspect } from './lib/environment.js';
 import { buildInstallPlan } from './lib/plan.js';
 import { installPlan } from './lib/install.js';
 import { probeRelayPort } from './lib/relay-port.js';
+import { discoverModels, recommendRoles, invalidRoles, profileModels } from './lib/discovery.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 256 * 1024;
-export function createServer({ token = randomBytes(32).toString('hex'), uiRoot = resolve(root, 'ui'), home = homedir(), environment, inspectEnvironmentFn = defaultInspect, afterWrite } = {}) {
+export function createServer({ token = randomBytes(32).toString('hex'), uiRoot = resolve(root, 'ui'), home = homedir(), environment, inspectEnvironmentFn = defaultInspect, discoveryModelsFn = discoverModels, afterWrite } = {}) {
   let origin;
   let relayPortPromise;
   const relayPort = () => relayPortPromise ??= probeRelayPort();
@@ -40,19 +41,30 @@ export function createServer({ token = randomBytes(32).toString('hex'), uiRoot =
         const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         const config = input.config ?? input;
         validateConfig(config);
+        let models;
+        try { models = await discoveryModelsFn(config.apiUrl, config.apiKey); }
+        catch (error) { return send(res, 409, { ok: false, code: error?.code === 'NO_MODELS' ? 'NO_MODELS' : 'MODEL_DISCOVERY_FAILED', error: error?.code === 'NO_MODELS' ? 'No usable models were returned. Enable models in CLIProxyAPI and retry.' : 'Could not discover models. Check the CLIProxyAPI URL, key, and connection, then retry.', networkChecked: true }); }
+        if (!Array.isArray(models) || !models.length) return send(res, 409, { ok: false, code: 'NO_MODELS', error: 'No usable models were returned. Enable models in CLIProxyAPI and retry.', networkChecked: true });
+        const recommended = recommendRoles(config.roles, models);
+        if (pathname === '/api/install') {
+          const invalid = invalidRoles(config.roles, models);
+          if (invalid.length) return send(res, 409, { ok: false, code: 'MODEL_UNAVAILABLE', error: `Select available models and supported efforts for: ${invalid.join(', ')}.`, roles: invalid, models, networkChecked: true });
+        }
+        const availableModels = profileModels(models);
+        const planConfig = pathname === '/api/validate' ? { ...config, roles: recommended } : config;
         const checks = await inspect();
         let port = await relayPort();
-        let plan = await buildInstallPlan(config, { targetHome: home, runtimePaths: checks.runtimePaths, relayPort: port });
+        let plan = await buildInstallPlan(planConfig, { targetHome: home, runtimePaths: checks.runtimePaths, relayPort: port, availableModels });
         const blockers = [...(checks.blockers || []), ...plan.requirements.filter(r => typeof r === 'string' && r.startsWith('BLOCKER:'))];
         const warnings = [...(checks.warnings || []), ...plan.requirements.filter(r => typeof r === 'string' && !r.startsWith('BLOCKER:'))];
-        if (pathname === '/api/validate') return send(res, 200, { ok: true, apiUrl: plan.apiUrl, environment: publicEnvironment(checks), blockers, warnings, preview: { fileCount: plan.files.length, relayPort: port }, message: 'Configuration is structurally valid. No network request was made.' });
+        if (pathname === '/api/validate') return send(res, 200, { ok: true, apiUrl: plan.apiUrl, environment: publicEnvironment(checks), blockers, warnings, preview: { fileCount: plan.files.length, relayPort: port }, models, roles: recommended, networkChecked: true, discovery: 'ok', message: 'Models discovered successfully.' });
         if (blockers.length || checks.ok === false) return send(res, 409, { ok: false, code: 'PREFLIGHT_FAILED', error: 'Installation prerequisites are not satisfied.', blockers });
         // Retry only a port collision, after installPlan has cleaned up its stage and lock.
         for (let attempt = 0; ; attempt++) {
           try {
             await installPlan(plan, { checkEnvironment: async () => {
               const current = await inspect();
-              const currentPlan = await buildInstallPlan(config, { targetHome: home, runtimePaths: current.runtimePaths, relayPort: port });
+              const currentPlan = await buildInstallPlan(config, { targetHome: home, runtimePaths: current.runtimePaths, relayPort: port, availableModels });
               const currentBlockers = [...(current.blockers || []), ...currentPlan.requirements.filter(r => typeof r === 'string' && r.startsWith('BLOCKER:'))];
               if (current.ok === false || currentBlockers.length) return { ok: false, blockers: currentBlockers };
               if (JSON.stringify(current.runtimePaths || {}) !== JSON.stringify(checks.runtimePaths || {})) return { ok: false, blockers: ['Runtime environment changed during installation. Please retry.'] };
@@ -66,7 +78,7 @@ export function createServer({ token = randomBytes(32).toString('hex'), uiRoot =
             if (!error.relayPortOccupied || attempt >= 4) throw error;
             port = await probeRelayPort();
             relayPortPromise = Promise.resolve(port);
-            plan = await buildInstallPlan(config, { targetHome: home, runtimePaths: checks.runtimePaths, relayPort: port });
+            plan = await buildInstallPlan(config, { targetHome: home, runtimePaths: checks.runtimePaths, relayPort: port, availableModels });
           }
         }
         return send(res, 200, { ok: true, profilePath: resolve(home, '.dsh/profiles/desktop'), relayPort: port, backupPath: null, rollback: { instructions: 'Remove the installed profile and installer files only after confirming they are no longer needed.' }, warnings });

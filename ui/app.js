@@ -18,7 +18,7 @@
   ];
   // Общий набор, пока сервер не прислал уровни по моделям. Только то, что принимает lib/config.js
   // для всех семейств; «off» добавляется, только если его передал bootstrap.
-  const DEFAULT_EFFORTS = ['low', 'medium', 'high'];
+  const DEFAULT_EFFORTS = [];
 
   const state = {
     phase: 'loading', // loading | fatal | wizard | done
@@ -36,6 +36,8 @@
     access: {},
     models: [],
     modelsFromServer: false,
+    verifiedUrl: '',
+    verifiedKey: '',
     tutorial: '',
     apiUrl: '',
     apiKey: '',
@@ -199,8 +201,7 @@
     state.efforts = eff;
     state.access = Core.normalizeAccess(d);
 
-    const models = Core.normalizeModels(d.models || data.models);
-    if (models.length) { state.models = models; state.modelsFromServer = true; }
+    // Bootstrap defaults are not a verified model list.
 
     if (!state.apiUrl && typeof d.apiUrl === 'string') state.apiUrl = d.apiUrl;
     if (data.environment && typeof data.environment === 'object') state.env = data.environment;
@@ -275,12 +276,19 @@
     const seq = ++preflightSeq;
     const res = await api('POST', '/api/validate', currentConfig(), 45000);
     if (seq !== preflightSeq) return state.preflight;
-    if (res.data && res.data.ok === true) {
+    const available = Core.normalizeModels(res.data && res.data.models).map((id) => 'cliproxy/' + id.replace(/^cliproxy\//, ''));
+    const selectionsValid = state.roleOrder.every((key) => state.roleMeta[key].locks.model || available.includes(state.roles[key].model));
+    if (res.data && res.data.ok === true && res.data.discovery === 'ok' && res.data.networkChecked === true && available.length && discoveryReady() && selectionsValid) {
       const p = Core.normalizePreflight(res.data, secrets());
       state.preflight = { status: 'ok', blockers: p.blockers, warnings: p.warnings, tools: p.tools, fileCount: p.fileCount, messages: [] };
     } else {
       const p = Core.normalizePreflight(res.data, secrets());
-      state.preflight = { status: 'fail', blockers: p.blockers, warnings: p.warnings, tools: p.tools, fileCount: null, messages: problems(res).messages };
+      if (!selectionsValid || (res.data && res.data.ok === true)) {
+        invalidateValidation();
+        state.preflight = { status: 'fail', blockers: [], warnings: [], tools: [], fileCount: null, messages: [{ message: 'Список моделей изменился или недоступен. Вернитесь к CLIProxyAPI и повторите проверку.' }] };
+      } else {
+        state.preflight = { status: 'fail', blockers: p.blockers, warnings: p.warnings, tools: p.tools, fileCount: null, messages: problems(res).messages };
+      }
     }
     return state.preflight;
   }
@@ -303,8 +311,12 @@
   }
 
   /** Установка разрешена только после успешной проверки сервером без блокировок. */
+  function discoveryReady() {
+    return state.modelsFromServer && state.models.length > 0 && state.verifiedUrl === state.apiUrl && state.verifiedKey === state.apiKey;
+  }
+
   function installReady() {
-    return state.preflight.status === 'ok' && allBlockers().length === 0;
+    return discoveryReady() && validateStep(3).length === 0 && state.preflight.status === 'ok' && allBlockers().length === 0;
   }
 
   function next() {
@@ -334,6 +346,7 @@
       const u = Core.validateApiUrl(state.apiUrl);
       if (!u.ok) errs.push({ id: 'apiUrl', message: u.message });
       if (!state.apiKey.trim()) errs.push({ id: 'apiKey', message: 'Укажите API-ключ.' });
+      if (!discoveryReady()) errs.push({ id: 'btn-validate', message: 'Проверьте подключение и получите список моделей для текущего адреса и ключа.' });
     }
     if (step === 2) {
       for (const m of state.mcps) {
@@ -351,11 +364,11 @@
         const meta = state.roleMeta[key];
         const r = state.roles[key];
         // Модель обязательна везде, кроме роутера: он наследует основную.
-        if (!meta.locks.model && !String(r.model || '').trim()) {
-          errs.push({ id: 'model-' + key, message: meta.label + ': укажите модель.' });
+        if (!meta.locks.model && (!discoveryReady() || !state.models.includes(r.model))) {
+          errs.push({ id: 'model-' + key, message: meta.label + ': выберите модель из проверенного списка CLIProxyAPI.' });
         }
         if (!meta.locks.effort) {
-          const fit = Core.reconcileEffort(r.model, r.effort, state.efforts);
+          const fit = Core.reconcileEffort(meta.locks.model ? state.roles.main.model : r.model, r.effort, state.efforts);
           if (fit.reset) {
             errs.push({ id: 'effort-' + key, message: meta.label + ': ' + (fit.none ? 'у этой модели нет уровней усилия' : 'уровень «' + fit.previous + '» не поддерживается этой моделью') + '. Выберите «не задан» или другой уровень.' });
           }
@@ -376,7 +389,7 @@
     STEPS.forEach((s, i) => {
       const done = state.phase === 'done' || i < state.step;
       const current = state.phase === 'wizard' && i === state.step;
-      const reachable = state.phase === 'wizard' && i <= state.maxStep && !state.busy;
+      const reachable = state.phase === 'wizard' && i <= state.maxStep && !state.busy && (i <= 1 || discoveryReady());
       const btn = el('button', {
         type: 'button',
         class: 'step-btn',
@@ -584,7 +597,7 @@
           type: 'button', class: 'btn', id: 'btn-validate', disabled: !!state.busy,
           onclick: runValidate,
         }, state.busy === 'validate' ? [el('span', { class: 'spinner', 'aria-hidden': 'true' }), 'Проверяем…'] : 'Проверить настройки'),
-        el('p', { class: 'hint', text: 'Проверка необязательна. Данные уходят только на локальный сервер установщика; будет ли он обращаться к вашему адресу, покажет результат — мы ничего не выдумываем.' })),
+        el('p', { class: 'hint', text: 'Обязательная проверка запрашивает список моделей у CLIProxyAPI. Запрос к модели не выполняется.' })),
       status));
     root.append(navActions());
     queueMicrotask(() => paintValidation(status));
@@ -592,7 +605,12 @@
   }
 
   function invalidateValidation() {
-    if (state.validation.status === 'none') return;
+    state.models = [];
+    state.modelsFromServer = false;
+    state.verifiedUrl = '';
+    state.verifiedKey = '';
+    state.preflight.status = 'none';
+    ++preflightSeq;
     state.validation = { status: 'none', messages: [], note: '' };
     paintValidation(document.getElementById('validation-status'));
   }
@@ -630,29 +648,32 @@
     state.validation = { status: 'none', messages: [], note: '' };
     state.animate = false;
     render('btn-validate');
+    const checkedUrl = state.apiUrl, checkedKey = state.apiKey;
     const res = await api('POST', '/api/validate', currentConfig(), 45000);
     state.busy = '';
-    if (res.data && res.data.ok === true) {
+    if (checkedUrl !== state.apiUrl || checkedKey !== state.apiKey) { invalidateValidation(); render(); return; }
+    if (res.data && res.data.ok === true && res.data.discovery === 'ok' && res.data.networkChecked === true && Core.normalizeModels(res.data.models).length && res.data.roles && typeof res.data.roles === 'object') {
       const models = Core.normalizeModels(res.data.models);
       const d = res.data;
-      // Сетевую проверку считаем выполненной только если сервер прямо об этом сказал.
-      const network = d.networkChecked === true || d.network === true || (d.network && d.network.ok === true);
-      const parts = [];
-      if (typeof d.message === 'string' && d.message) parts.push(Core.sanitizeText(Core.translateServerText(d.message), secrets()));
-      else parts.push(network ? 'Сервер связался с CLIProxyAPI.' : 'Сетевой запрос к CLIProxyAPI не выполнялся.');
-      if (typeof d.apiUrl === 'string' && d.apiUrl) parts.push('Адрес, который будет записан: ' + Core.sanitizeText(d.apiUrl, secrets(), 300));
-      if (models.length) {
-        state.models = models;
-        state.modelsFromServer = true;
-        parts.push('Получено моделей: ' + models.length + '.');
+      state.models = models.map((id) => 'cliproxy/' + id.replace(/^cliproxy\//, ''));
+      state.modelsFromServer = true;
+      state.verifiedUrl = checkedUrl;
+      state.verifiedKey = checkedKey;
+      state.efforts = Core.normalizeEfforts({}, { models: d.models.map((m) => ({ ...m, id: 'cliproxy/' + m.id.replace(/^cliproxy\//, '') })) });
+      state.effortsFromServer = true;
+      for (const key of state.roleOrder) {
+        if (d.roles[key]) state.roles[key] = { model: d.roles[key].model || '', effort: d.roles[key].effort || '' };
       }
+      const network = true;
+      const parts = ['Список моделей CLIProxyAPI получен: ' + models.length + '. Запрос к модели не выполнялся. Проверьте назначения на шаге «Роли и модели».'];
       const pf = Core.normalizePreflight(d, secrets());
       state.validation = {
         status: 'ok', title: network ? 'Подключение проверено' : 'Формат настроек корректен', messages: [], note: parts.join(' '),
         blockers: pf.blockers,
       };
     } else {
-      state.validation = { status: 'fail', messages: problems(res).messages, note: '' };
+      invalidateValidation();
+      state.validation = { status: 'fail', messages: res.data && res.data.ok === true ? [{ message: 'Список моделей не получен. Проверьте CLIProxyAPI и повторите проверку.' }] : problems(res).messages, note: '' };
     }
     state.animate = false;
     render('btn-validate');
@@ -741,8 +762,7 @@
     root.append(...heading('Шаг 4 из 5', 'Роли и модели Oh My DSH Slim',
       'Здесь подставлены текущие значения. Меняйте, только если знаете, зачем.'));
 
-    const dl = el('datalist', { id: 'models-list' }, state.models.map((m) => el('option', { value: m })));
-    root.append(errorSummary(), dl);
+    root.append(errorSummary());
 
     const group = (g) => state.roleOrder.filter((k) => groupOf(k) === g);
     const mainKeys = group('main');
@@ -750,8 +770,8 @@
     const otherKeys = group('helpers');
 
     const modelsNote = state.modelsFromServer
-      ? 'Подсказки в списке — модели, которые вернул сервер. Это не гарантия, что маршрут к модели работает.'
-      : 'Список моделей недоступен: сервер его не передал. Введите идентификатор модели вручную.';
+      ? 'Выберите модель из списка, полученного от CLIProxyAPI. Доступность ответа модели не проверялась.'
+      : 'Список моделей не проверен. Вернитесь к CLIProxyAPI и нажмите «Проверить настройки».';
 
     if (mainKeys.length) {
       root.append(el('section', { class: 'card', 'aria-labelledby': 'h-main' },
@@ -774,12 +794,6 @@
     root.append(el('p', { class: 'hint models-note', text: modelsNote }));
 
     root.append(accessCard());
-    if (hasDeepSeek()) {
-      const note = callout('warn', 'DeepSeek: нужен ручной вход',
-        el('p', { text: 'Для моделей DeepSeek аккаунт подключается вручную: войдите в него самостоятельно. Установщик вход не выполняет и пароли от DeepSeek не просит.' }));
-      note.id = 'deepseek-note';
-      root.append(note);
-    }
     root.append(navActions());
     return root;
   }
@@ -824,9 +838,8 @@
         effHint.textContent = 'Уровень усилия основной модели меняется в сессии, установщик его не задаёт.';
         return;
       }
-      const allowed = Core.effortsFor(role.model, state.efforts);
+      const allowed = Core.effortsFor(meta.locks.model ? state.roles.main.model : role.model, state.efforts);
       const list = allowed.list.slice();
-      if (role.effort && !list.includes(role.effort)) list.push(role.effort); // не прячем текущее значение
       select.textContent = '';
       select.append(el('option', { value: '', text: 'не задан' }));
       for (const e of list) select.append(el('option', { value: e, text: e }));
@@ -849,8 +862,13 @@
           note = 'Уровень «' + fit.previous + '» сброшен: ' + (fit.none ? 'у этой модели нет уровней усилия.' : 'эта модель его не поддерживает.');
         }
       }
-      paintDeepSeek();
       paintEffort(note);
+      if (key === 'main' && state.roles.orchestrator) {
+        const fit = Core.reconcileEffort(role.model, state.roles.orchestrator.effort, state.efforts);
+        if (fit.reset) state.roles.orchestrator.effort = '';
+        state.animate = false;
+        render(null, modelId);
+      }
     };
     paintEffort();
 
@@ -859,13 +877,14 @@
         el('label', { for: modelId, text: 'Модель' }),
         el('input', { id: modelId, type: 'text', disabled: true, 'aria-describedby': modelId + '-hint', value: 'Наследует основную модель' }),
         el('p', { class: 'hint', id: modelId + '-hint', text: 'Отдельную модель роутеру задать нельзя: он использует основную.' }))
-      : fieldNode({
-        id: modelId, label: 'Модель', required: true,
-        mono: true, list: 'models-list', value: role.model,
-        placeholder: 'провайдер/модель',
-        hint: 'Полный идентификатор: провайдер/модель.',
-        onInput: onModel,
-      });
+      : (() => {
+        const picker = el('select', { id: modelId, required: true, onchange: () => onModel(picker.value) },
+          el('option', { value: '', text: 'Выберите модель' }),
+          state.models.map((m) => el('option', { value: m, text: m })));
+        picker.value = role.model;
+        return el('div', { class: 'field' }, el('label', { for: modelId, text: 'Модель' }), picker,
+          el('p', { class: 'hint', text: 'Проверенный список CLIProxyAPI.' }));
+      })();
     return el('div', { class: 'role' },
       el('div', { class: 'role__head' },
         el('span', { class: 'role__name', text: meta.label }),
@@ -1035,6 +1054,7 @@
       return;
     }
     const p = problems(res);
+    if (['MODEL_UNAVAILABLE', 'MODEL_DISCOVERY_FAILED', 'NO_MODELS'].includes(p.code)) invalidateValidation();
     state.installErrors = p.messages;
     state.animate = false;
     if (res.status === 409 || /harness/i.test(p.code)) {
@@ -1054,7 +1074,7 @@
     const root = el('div');
     root.append(el('div', { class: 'done-mark', 'aria-hidden': 'true', text: '✓' }));
     root.append(...heading('Готово', 'Файлы профиля записаны',
-      'Установщик записал профиль и ничего не запускал: не открывал DSH, не стартовал MCP и не обращался к модели. Работу связи с CLIProxyAPI и MCP он не проверял.'));
+      'Установщик записал профиль: он получил список моделей CLIProxyAPI, но не отправлял запрос к модели, не открывал DSH и не запускал MCP. Работу моделей и MCP нужно проверить отдельно.'));
 
     root.append(el('section', { class: 'card', 'aria-labelledby': 'h-next' },
       el('h2', { id: 'h-next', text: 'Что дальше' }),

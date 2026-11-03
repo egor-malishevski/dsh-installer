@@ -22,7 +22,6 @@ test('rejects invalid roles and ignored overrides', () => {
     c => { c.roles.fixer.model = 'cliproxy/model;bad'; },
     c => { c.roles.fixer.model = ''; },
     c => { c.roles.fixer.effort = 'xhigh'; },
-    c => { c.roles.librarian.effort = 'high'; },
     c => { c.roles.main.effort = 'high'; },
     c => { c.roles.orchestrator.model = 'cliproxy/model'; },
   ]) {

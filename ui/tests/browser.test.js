@@ -44,6 +44,11 @@ async function launch() {
   return null;
 }
 
+async function checkModels(page) {
+  await page.click('#btn-validate');
+  await page.waitForSelector('#validation-status .callout--ok');
+}
+
 test('мастер: шаги, клавиатура, секреты не попадают в итог', async (t) => {
   if (!chromium) return t.skip('Playwright не найден');
   const browser = await launch();
@@ -84,8 +89,8 @@ test('мастер: шаги, клавиатура, секреты не попа
     await page.click('#btn-validate');
     await page.waitForSelector('#validation-status .callout--ok');
     const vtext = await page.textContent('#validation-status');
-    assert.match(vtext, /не выполнялся/, 'не выдаём сетевую проверку, которой не было');
-    assert.ok(!vtext.includes('Подключение проверено'));
+    assert.match(vtext, /Список моделей CLIProxyAPI получен/);
+    assert.match(vtext, /Запрос к модели не выполнялся/);
     await page.click('#btn-next');
 
     // Шаг 3: по умолчанию ничего не выбрано, все 8 на месте
@@ -107,25 +112,25 @@ test('мастер: шаги, клавиатура, секреты не попа
 
     // Шаг 4: значения по умолчанию из bootstrap
     await page.waitForSelector('#model-oracle');
-    assert.equal(await page.inputValue('#model-oracle'), 'test-oracle-model');
+    assert.equal(await page.inputValue('#model-oracle'), 'cliproxy/test-oracle-model');
     assert.equal(await page.inputValue('#effort-oracle'), 'high');
     // effort main задаётся в сессии: поле заблокировано, списка уровней нет
     assert.deepEqual(await page.locator('#effort-main option').allTextContents(), ['Настраивается в сессии']);
     assert.equal(await page.isDisabled('#effort-main'), true);
     await page.selectOption('#effort-oracle', 'medium');
-    await page.fill('#model-oracle', 'test-main-model');
+    await page.selectOption('#model-oracle', 'cliproxy/test-main-model');
     assert.match(await page.textContent('#effort-oracle-hint'), /данных сервера/);
     assert.deepEqual(await page.locator('#effort-oracle option').allTextContents(), ['не задан', 'low', 'high'], 'список сменился вместе с моделью');
     assert.equal(await page.inputValue('#effort-oracle'), '', 'несовместимый уровень сброшен сразу, а не при отправке');
     assert.match(await page.textContent('#effort-oracle-hint'), /Уровень «medium» сброшен/, 'сброс объяснён в интерфейсе');
     await page.selectOption('#effort-oracle', 'high');
-    await page.fill('#model-oracle', 'test-oracle-model');
-    assert.ok(await page.locator('#models-list option').count() >= 1 || true);
-    assert.equal(await page.inputValue('#model-main'), 'test-main-model');
+    await page.selectOption('#model-oracle', 'cliproxy/test-oracle-model');
+    assert.ok(await page.locator('#model-oracle option').count() > 1);
+    assert.equal(await page.inputValue('#model-main'), 'cliproxy/test-main-model');
     assert.equal(await page.inputValue('#model-orchestrator'), 'Наследует основную модель');
     assert.equal(await page.isDisabled('#model-orchestrator'), true);
     assert.ok(await page.locator('#h-main').isVisible() && await page.locator('#h-router').isVisible(), 'основная и роутер отдельно');
-    assert.ok(await page.locator('#deepseek-note').isVisible(), 'предупреждение DeepSeek');
+    assert.match(await page.inputValue('#model-explorer'), /^cliproxy\//);
     await page.click('#btn-next');
     assert.equal(await page.locator('#errsum').count(), 0, 'роутер наследует модель: ошибок нет');
 
@@ -172,6 +177,7 @@ test('Harness запущен: установка заблокирована', as
     await page.click('#btn-next');
     await page.fill('#apiUrl', 'https://proxy.example.test');
     await page.fill('#apiKey', API_KEY);
+    await checkModels(page);
     await page.click('#btn-next');
     await page.click('#btn-next');
     await page.click('#btn-next');
@@ -226,6 +232,7 @@ test('мобильный и узкий экран: без горизонталь
     await check('шаг 2');
     await page.fill('#apiUrl', 'https://proxy.example.test');
     await page.fill('#apiKey', API_KEY);
+    await checkModels(page);
     await page.click('#btn-next');
     await check('шаг 3');
     await page.click('#btn-next');
@@ -266,6 +273,7 @@ test('нет uvx: требование MCP и блокировка видны, �
     await page.click('#btn-next');
     await page.fill('#apiUrl', 'https://proxy.example.test');
     await page.fill('#apiKey', API_KEY);
+    await checkModels(page);
     await page.click('#btn-next');
     await page.check('#mcp-jira');
     assert.match(await page.textContent('#mcp-reqs-jira'), /не найдено/);
@@ -297,6 +305,7 @@ test('GitLab и Bitbucket: можно выбрать любой, оба или �
     await page.click('#btn-next');
     await page.fill('#apiUrl', 'https://proxy.example.test');
     await page.fill('#apiKey', API_KEY);
+    await checkModels(page);
     await page.click('#btn-next');
 
     // карточка GitLab из каталога, описание переведено, по умолчанию не выбрана
@@ -339,6 +348,7 @@ test('GitLab и Bitbucket: можно выбрать любой, оба или �
     await page2.click('#btn-next');
     await page2.fill('#apiUrl', 'https://proxy.example.test');
     await page2.fill('#apiKey', API_KEY);
+    await checkModels(page2);
     await page2.click('#btn-next');
     await page2.click('#btn-next');
     await page2.click('#btn-next');
@@ -361,11 +371,19 @@ test('реальный каталог бэкенда: GitLab и Google Sheets р
   const GL_TOKEN = 'glpat-real-TOKEN-0004';
   try {
     const page = await browser.newPage();
+    await page.route('**/api/validate', async (route) => {
+      const roles = {};
+      for (const key of ['orchestrator', 'oracle', 'designer', 'fixer', 'explorer', 'librarian', 'main']) {
+        roles[key] = { model: key === 'orchestrator' ? '' : 'cliproxy/test-model', effort: '' };
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, discovery: 'ok', networkChecked: true, models: [{ id: 'test-model' }], roles }) });
+    });
     await page.goto(inst.origin + '/#' + inst.token);
     await page.check('#tutorial-skip');
     await page.click('#btn-next');
     await page.fill('#apiUrl', 'https://proxy.example.test');
     await page.fill('#apiKey', API_KEY);
+    await checkModels(page);
     await page.click('#btn-next');
 
     assert.equal(await page.locator('.mcp__check:checked').count(), 0, 'по умолчанию ничего не выбрано');
@@ -410,6 +428,7 @@ async function toRoles(page, srv) {
   await page.click('#btn-next');
   await page.fill('#apiUrl', 'https://proxy.example.test');
   await page.fill('#apiKey', API_KEY);
+  await checkModels(page);
   await page.click('#btn-next');
   await page.click('#btn-next');
   await page.waitForSelector('#model-oracle');
@@ -445,12 +464,12 @@ test('роли: нет полей, которые сервер отклонит 
 
     // смена модели на Grok сбрасывает уровень сразу и объясняет почему
     await page.selectOption('#effort-fixer', 'medium');
-    await page.fill('#model-fixer', 'cliproxy/grok-4.7');
+    await page.selectOption('#model-fixer', 'cliproxy/grok-4.7');
     assert.equal(await page.inputValue('#effort-fixer'), '');
     assert.equal(await page.isDisabled('#effort-fixer'), true);
     assert.match(await page.textContent('#effort-fixer-hint'), /Уровень «medium» сброшен/);
     // и возвращается выбор, когда модель снова поддерживает уровни
-    await page.fill('#model-fixer', 'test-oracle-model');
+    await page.selectOption('#model-fixer', 'cliproxy/test-oracle-model');
     assert.equal(await page.isDisabled('#effort-fixer'), false);
 
     // что уходит на сервер
@@ -485,24 +504,17 @@ test('роли: нет полей, которые сервер отклонит 
   }
 });
 
-test('bootstrap без данных об уровнях: общий low/medium/high, Grok без уровней', async (t) => {
+test('неизвестная модель не получает выдуманные уровни усилия', async (t) => {
   if (!chromium) return t.skip('Playwright не найден');
   const browser = await launch();
   if (!browser) return t.skip('Chromium не установлен');
-  const srv = await listen({ withEfforts: false });
+  const srv = await listen({ discoveryModels: [{ id: 'unknown-model' }] });
   try {
     const page = await browser.newPage();
     await toRoles(page, srv);
-    assert.deepEqual(await page.locator('#effort-oracle option').allTextContents(), ['не задан', 'low', 'medium', 'high']);
-    assert.match(await page.textContent('#effort-oracle-hint'), /не передал список по модели/);
-    assert.equal(await page.isDisabled('#effort-librarian'), true, 'Grok без уровней и без данных сервера');
-    await page.fill('#model-oracle', 'cliproxy/grok-4.7-build-fast');
-    assert.equal(await page.inputValue('#effort-oracle'), '');
-    assert.match(await page.textContent('#effort-oracle-hint'), /сброшен/);
-  } finally {
-    await browser.close();
-    await srv.close();
-  }
+    assert.deepEqual(await page.locator('#effort-oracle option').allTextContents(), ['не задан']);
+    assert.equal(await page.isDisabled('#effort-oracle'), true);
+  } finally { await browser.close(); await srv.close(); }
 });
 
 test('409 PREFLIGHT_FAILED: причины из blockers показаны на шаге проверки', async (t) => {
@@ -569,4 +581,90 @@ test('validate без blockers: число файлов показано, уст
     await browser.close();
     await srv.close();
   }
+});
+
+
+test('без Grok: доступны только модели proxy, Explorer тоже использует CLIProxyAPI', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  const srv = await listen({ discoveryModels: [
+    { id: 'test-main-model', reasoningEfforts: ['low', 'high'] },
+    { id: 'test-oracle-model', reasoningEfforts: ['low', 'high'] },
+  ] });
+  try {
+    const page = await browser.newPage(); await toRoles(page, srv);
+    assert.equal(await page.locator('#model-librarian option[value*="grok"]').count(), 0);
+    for (const role of ['main', 'oracle', 'designer', 'fixer', 'explorer', 'librarian']) {
+      assert.match(await page.inputValue('#model-' + role), /^cliproxy\/(test-main-model|test-oracle-model)$/);
+    }
+    assert.equal(await page.locator('#model-explorer').evaluate((el) => el.tagName), 'SELECT');
+    assert.equal(await page.locator('#model-explorer option[value="cliproxy/unavailable"]').count(), 0);
+    await page.evaluate(() => { const el = document.querySelector('#model-explorer'); el.value = 'cliproxy/unavailable'; el.dispatchEvent(new Event('change')); });
+    await page.click('#btn-next');
+    assert.match(await page.textContent('#errsum'), /выберите модель из проверенного списка/);
+  } finally { await browser.close(); await srv.close(); }
+});
+
+test('одна модель proxy назначается всем ролям с допустимым effort', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  const srv = await listen({ discoveryModels: [{ id: 'only-model', reasoningEfforts: ['low'] }] });
+  try {
+    const page = await browser.newPage(); await toRoles(page, srv);
+    for (const role of ['main', 'oracle', 'designer', 'fixer', 'explorer', 'librarian']) {
+      assert.equal(await page.inputValue('#model-' + role), 'cliproxy/only-model');
+      if (role !== 'main') assert.ok(['', 'low'].includes(await page.inputValue('#effort-' + role)));
+    }
+    await page.click('#btn-next'); await page.waitForSelector('#preflight-ok');
+    assert.equal(await page.isDisabled('#btn-install'), false);
+  } finally { await browser.close(); await srv.close(); }
+});
+
+test('изменение URL или ключа требует новой проверки', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  const srv = await listen();
+  try {
+    const page = await browser.newPage(); await toRoles(page, srv);
+    for (const [field, value] of [['#apiUrl', 'https://another.example.test'], ['#apiKey', 'new-key-12345']]) {
+      await page.click('.step-btn >> nth=1'); await page.fill(field, value);
+      await page.click('#btn-next');
+      assert.match(await page.textContent('#errsum'), /Проверьте подключение/);
+      assert.equal(await page.locator('#mcp-counter').count(), 0);
+      await checkModels(page); await page.click('#btn-next'); await page.click('#btn-next');
+      await page.waitForSelector('#model-explorer');
+    }
+    assert.equal(srv.log.requests.filter((r) => r.path === '/api/install').length, 0);
+  } finally { await browser.close(); await srv.close(); }
+});
+
+for (const [label, options] of [['ошибка discovery', { validateOk: false }], ['пустой список', { discoveryModels: [] }]]) {
+  test(label + ': продолжение и установка заблокированы', async (t) => {
+    if (!chromium) return t.skip('Playwright не найден');
+    const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+    const srv = await listen(options);
+    try {
+      const page = await browser.newPage();
+      await page.goto('http://127.0.0.1:' + srv.port + '/#token=' + srv.options.token);
+      await page.check('#tutorial-skip'); await page.click('#btn-next');
+      await page.fill('#apiUrl', 'https://proxy.example.test'); await page.fill('#apiKey', API_KEY);
+      await page.click('#btn-validate'); await page.waitForSelector('#validation-status .callout--bad');
+      await page.click('#btn-next'); assert.match(await page.textContent('#errsum'), /Проверьте подключение/);
+      assert.equal(srv.log.requests.filter((r) => r.path === '/api/install').length, 0);
+    } finally { await browser.close(); await srv.close(); }
+  });
+}
+
+test('список изменился при установке: нет успеха, требуется повторная проверка', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  const srv = await listen({ installModelUnavailable: true });
+  try {
+    const page = await browser.newPage(); await toRoles(page, srv);
+    await page.click('#btn-next'); await page.waitForSelector('#preflight-ok');
+    await page.click('#btn-install'); await page.waitForSelector('#install-errors');
+    assert.match(await page.textContent('#install-errors'), /Список моделей изменился/);
+    assert.equal(await page.locator('#h-backup').count(), 0);
+    assert.equal(await page.isDisabled('#btn-install'), true);
+  } finally { await browser.close(); await srv.close(); }
 });
