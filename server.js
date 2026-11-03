@@ -5,14 +5,14 @@ import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { mcps, roles, validateConfig } from './lib/config.js';
-import { inspectEnvironment as defaultInspect, assertStopped } from './lib/environment.js';
+import { inspectEnvironment as defaultInspect } from './lib/environment.js';
 import { buildInstallPlan } from './lib/plan.js';
 import { installPlan } from './lib/install.js';
 import { probeRelayPort } from './lib/relay-port.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 256 * 1024;
-export function createServer({ token = randomBytes(32).toString('hex'), uiRoot = resolve(root, 'ui'), home = homedir(), environment, inspectEnvironmentFn = defaultInspect, assertStoppedFn = assertStopped, afterWrite } = {}) {
+export function createServer({ token = randomBytes(32).toString('hex'), uiRoot = resolve(root, 'ui'), home = homedir(), environment, inspectEnvironmentFn = defaultInspect, afterWrite } = {}) {
   let origin;
   let relayPortPromise;
   const relayPort = () => relayPortPromise ??= probeRelayPort();
@@ -60,7 +60,7 @@ export function createServer({ token = randomBytes(32).toString('hex'), uiRoot =
                 return { ok: false, blockers: [`Relay port ${port} is unavailable.`], relayPortOccupied: error?.code === 'EADDRINUSE' };
               }
               return { ok: true };
-            }, checkStopped: () => assertStoppedFn(resolve(home, '.dsh'), { home }), afterWrite });
+            }, afterWrite });
             break;
           } catch (error) {
             if (!error.relayPortOccupied || attempt >= 4) throw error;

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { installPlan } from '../lib/install.js';
 
-const callbacks = () => ({ checkEnvironment: async () => true, checkStopped: async () => true });
+const callbacks = () => ({ checkEnvironment: async () => true });
 const files = () => [{ path: '.dsh/profiles/desktop/config.json', content: 'secret-value', secret: true }, { path: '.dsh/profiles/desktop/other', content: Buffer.from('data'), secret: false }];
 async function fixture(t) {
   const home = await mkdtemp(path.join(await realpath(os.tmpdir()), 'install-test-'));
@@ -18,10 +18,10 @@ test('installs privately, checks twice, preserves unrelated native data, and ref
   const home = await fixture(t);
   await mkdir(path.join(home, '.dsh'));
   await writeFile(path.join(home, '.dsh', 'native'), 'untouched');
-  let env = 0, stopped = 0;
-  const result = await installPlan({ targetHome: home, files: files() }, { checkEnvironment: async () => { env++; return true; }, checkStopped: async () => { stopped++; return true; } });
+  let env = 0;
+  const result = await installPlan({ targetHome: home, files: files() }, { checkEnvironment: async () => { env++; return true; } });
   assert.deepEqual(result, { ok: true, installedPaths: files().map(f => f.path), rollbackSupported: true });
-  assert.equal(env, 2); assert.equal(stopped, 2);
+  assert.equal(env, 2);
   assert.equal(await readFile(path.join(home, '.dsh/native'), 'utf8'), 'untouched');
   for (const dir of ['.dsh/profiles', '.dsh/profiles/desktop']) assert.equal((await stat(path.join(home, dir))).mode & 0o777, 0o700);
   for (const file of files()) assert.equal((await stat(path.join(home, file.path))).mode & 0o777, 0o600);

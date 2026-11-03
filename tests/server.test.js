@@ -15,7 +15,7 @@ test('URL normalization rejects credentials and insecure external destinations',
 });
 test('local API requires capability and same origin, validates without installing', async t => {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh-server-')));
-  const instance = createServer({ home, inspectEnvironmentFn: async () => ({ ok: true, blockers: [], checks: [], runtimePaths: {} }), assertStoppedFn: async () => ({ ok: true }) });
+  const instance = createServer({ home, inspectEnvironmentFn: async () => ({ ok: true, blockers: [], checks: [], runtimePaths: {} }) });
   await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => instance.server.close(resolve)); await rm(home, { recursive: true, force: true }); });
   const base = instance.origin;
@@ -54,7 +54,7 @@ test('repeated preflight reports selected MCP Node requirement', async t => {
 
 test('occupied preview port is replaced consistently in installed files and response', async t => {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh-server-')));
-  const instance = createServer({ home, inspectEnvironmentFn: async () => ({ ok: true, blockers: [], checks: [], runtimePaths: {} }), assertStoppedFn: async () => ({ ok: true }) });
+  const instance = createServer({ home, inspectEnvironmentFn: async () => ({ ok: true, blockers: [], checks: [], runtimePaths: {} }) });
   await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
   const occupied = createNetServer();
   t.after(async () => { if (occupied.listening) await new Promise(resolve => occupied.close(resolve)); await new Promise(resolve => instance.server.close(resolve)); await rm(home, { recursive: true, force: true }); });
