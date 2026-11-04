@@ -146,7 +146,7 @@ test('E2E: без MCP — настоящий server.js записывает фа
   // что реально записано
   const files = await walk(path.join(ctx.home, '.dsh'));
   t.diagnostic('записано файлов: ' + files.length + ' (по плану ' + planned + ', включая 2 symlink)');
-  assert.equal(await fs.readFile(path.join(ctx.home, '.dsh/secrets/installer/cliproxy-key'), 'utf8'), API_KEY + '\n');
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(ctx.home, '.dsh/.credentials.yaml'), 'utf8')), { version: 1, refs: { CLIPROXY_API_KEY: API_KEY } });
   assert.ok(files.some((f) => f.startsWith('profiles/desktop/cordis.patch.yml')));
   assert.equal(await fs.readlink(path.join(ctx.home, '.dsh/profiles/desktop/node_modules/dsh-integrations')), '../../../bundles/dsh-integrations');
   assert.ok(!files.some((f) => f.includes('gitlab-token')), 'без выбора MCP токенов MCP нет');
@@ -160,7 +160,7 @@ test('E2E: без MCP — настоящий server.js записывает фа
   await page2.click('#btn-install');
   await page2.waitForSelector('#install-errors');
   assert.match(await page2.textContent('#install-errors'), /не перезаписывает|уже существует/);
-  assert.equal(await fs.readFile(path.join(ctx.home, '.dsh/secrets/installer/cliproxy-key'), 'utf8'), API_KEY + '\n');
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(ctx.home, '.dsh/.credentials.yaml'), 'utf8')), { version: 1, refs: { CLIPROXY_API_KEY: API_KEY } });
   assert.equal(await page2.locator('#h-backup').count(), 0, 'экран «готово» не показан');
 
   assert.deepEqual(external, [], 'внешних запросов нет');
@@ -190,13 +190,13 @@ test('E2E: GitLab с тестовыми данными — токен тольк
 
   const home = ctx.home;
   assert.equal(await fs.readFile(path.join(home, '.dsh/secrets/installer/gitlab-token'), 'utf8'), GITLAB_TOKEN + '\n');
-  assert.equal(await fs.readFile(path.join(home, '.dsh/secrets/installer/cliproxy-key'), 'utf8'), API_KEY + '\n');
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(home, '.dsh/.credentials.yaml'), 'utf8')), { version: 1, refs: { CLIPROXY_API_KEY: API_KEY } });
   const bundlePatch = await fs.readFile(path.join(home, '.dsh/bundles/dsh-integrations/cordis.patch.yml'), 'utf8');
   assert.ok(bundlePatch.includes('gitlab.example.test') && !bundlePatch.includes(GITLAB_TOKEN), 'в патче адрес есть, токена нет');
   const profile = await fs.readFile(path.join(home, '.dsh/profiles/desktop/cordis.patch.yml'), 'utf8');
   assert.ok(!profile.includes(GITLAB_TOKEN) && !profile.includes(API_KEY));
   for (const f of await walk(path.join(home, '.dsh'))) {
-    if (f.startsWith('secrets/')) continue;
+    if (f.startsWith('secrets/') || f === '.credentials.yaml') continue;
     if (f.includes(' -> ')) continue;
     const text = await fs.readFile(path.join(home, '.dsh', f.split(' -> ')[0])).then((b) => b.toString('latin1'));
     assert.ok(!text.includes(GITLAB_TOKEN) && !text.includes(API_KEY), 'секрет только в secrets/: ' + f);

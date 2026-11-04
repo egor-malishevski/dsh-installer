@@ -33,7 +33,9 @@ test('generates fresh profile with exact routes and scoped shared grants', () =>
   assert.deepEqual(rows.find(row => row.id === 'agent-default-model').config, { provider: 'cliproxy', model: 'claude-opus-5-5' });
   const provider = rows.find(row => row.id === 'llm-pi-ai').config.providers.cliproxy;
   assert.equal(provider.baseURL, 'http://127.0.0.1:18317/v1');
-  assert.match(provider.headers.Authorization, /installer\/cliproxy-key/);
+  assert.equal(provider.apiKeyEnv, 'CLIPROXY_API_KEY');
+  assert.equal(provider.headers, undefined);
+  assert.doesNotMatch(content, /!!js|Authorization|cliproxy-key/);
   assert.equal(provider.models[0].id, 'claude-opus-5-5');
   for (const model of provider.models) assert.deepEqual(model.input, ['text', 'image'], model.id);
   assert.equal(provider.discoverModels, undefined);
@@ -69,7 +71,8 @@ test('native profile loader and slim schema accept generated patch', { skip: !pr
   await writeFile(patchPath, generateProfile(config, options)[1].content);
   const patches = readProfilePatches('fixture', { dir, home, patchPath, overlays: [] }, { layers: [] });
   const provider = patches.find(row => row.id === 'llm-pi-ai').config.providers.cliproxy;
-  assert.match(provider.headers.Authorization.__jsExpr, /installer\/cliproxy-key/);
+  assert.equal(provider.apiKeyEnv, 'CLIPROXY_API_KEY');
+  assert.equal(provider.headers, undefined);
   assert.deepEqual(patches.find(row => row.id === 'agent-default-model').config, { provider: 'cliproxy', model: 'claude-opus-5-5' });
   const slim = patches.find(row => row.id === 'oh-my-dsh-slim').config;
   const schema = z(JSON.parse(JSON.stringify(buildConfigSchema(z))));

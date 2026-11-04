@@ -69,12 +69,17 @@ test('installed profile resolves and parses in the packaged host without activat
     oracle: { provider: 'cliproxy', model: 'gpt-6.1-sol', effort: 'high', sharedMcpTools: [...gitlabGrants.oracle, 'mcp__jira__jira_get_issue', 'mcp__jira__jira_search'] },
     designer: { provider: 'cliproxy', model: 'claude-sonnet-5-5', effort: 'medium', sharedMcpTools: ['mcp__jira__jira_get_issue', 'mcp__jira__jira_search', 'mcp__figma__get_figma_data'] },
     fixer: { provider: 'cliproxy', model: 'claude-sonnet-5-5', effort: 'medium', sharedMcpTools: [...gitlabGrants.fixer, 'mcp__jira__jira_get_issue', 'mcp__jira__jira_search'] },
-    explorer: { provider: 'deepseek-account', model: 'deepseek-flash', effort: 'low', sharedMcpTools: ['mcp__context7__resolve-library-id', 'mcp__context7__query-docs'] },
+    explorer: { provider: 'cliproxy', model: 'claude-haiku-5-5', effort: 'low', sharedMcpTools: ['mcp__context7__resolve-library-id', 'mcp__context7__query-docs'] },
     librarian: { provider: 'cliproxy', model: 'grok-4.7', sharedMcpTools: [...gitlabGrants.librarian, 'mcp__context7__resolve-library-id', 'mcp__context7__query-docs'] },
   });
   const patchPath = path.join(integrationDir, 'cordis.patch.yml');
   const publicText = (await readFile(patchPath, 'utf8')) + (await readFile(path.join(dir, 'cordis.patch.yml'), 'utf8'));
-  for (const [file, token] of [['cliproxy-key', config.apiKey], ['gitlab-token', config.mcps[0].values.token], ['jira-token', config.mcps[1].values.token], ['figma-api-key', config.mcps[3].values.apiKey]]) {
+  const store = path.join(dshHome, '.credentials.yaml');
+  assert.deepEqual(yaml.parse(await readFile(store, 'utf8')), { version: 1, refs: { CLIPROXY_API_KEY: config.apiKey } });
+  assert.equal((await stat(store)).mode & 0o777, 0o600);
+  assert.equal(publicText.includes(config.apiKey), false);
+  assert.equal(publicText.includes('Authorization'), false);
+  for (const [file, token] of [['gitlab-token', config.mcps[0].values.token], ['jira-token', config.mcps[1].values.token], ['figma-api-key', config.mcps[3].values.apiKey]]) {
     const secretPath = path.join(dshHome, 'secrets/installer', file);
     assert.equal(await readFile(secretPath, 'utf8'), token + '\n');
     assert.equal((await stat(secretPath)).mode & 0o777, 0o600);

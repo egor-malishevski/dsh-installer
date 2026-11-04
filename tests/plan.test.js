@@ -28,6 +28,39 @@ test('plan includes curated files and protects credentials', async () => {
   assert.equal(manifest.exports['./web-search-account'], undefined);
 });
 
+test('fresh home plans an owner-only credential store; existing store is skipped with a visible requirement', async () => {
+  const { mkdtemp, mkdir, writeFile, symlink, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const home = await mkdtemp(join(tmpdir(), 'dsh-plan-'));
+  try {
+    const config = { apiUrl: 'https://example.org/v1', apiKey: ' synthetic-plan-key ', mcps: [], roles };
+    const options = { targetHome: home, relayPort: 19123, runtimePaths: {} };
+    const fresh = await buildInstallPlan(config, options);
+    const store = fresh.files.filter(file => file.path === '.dsh/.credentials.yaml');
+    assert.equal(store.length, 1);
+    assert.equal(store[0].secret, true);
+    assert.deepEqual(JSON.parse(store[0].content), { version: 1, refs: { CLIPROXY_API_KEY: 'synthetic-plan-key' } });
+    assert.ok(!fresh.requirements.some(r => /credentials\.yaml/.test(r)));
+    assert.ok(!JSON.stringify(fresh.requirements).includes('synthetic-plan-key'));
+    assert.ok(!fresh.files.some(file => file.path.includes('cliproxy-key')));
+
+    await mkdir(join(home, '.dsh'));
+    await writeFile(join(home, '.dsh/.credentials.yaml'), 'version: 1\nrefs: {}\n');
+    const existing = await buildInstallPlan(config, options);
+    assert.ok(!existing.files.some(file => file.path === '.dsh/.credentials.yaml'));
+    assert.ok(existing.requirements.some(r => /credentials\.yaml/.test(r) && /Settings → Models → CLIProxyAPI.*Save/.test(r) && !r.startsWith('BLOCKER:')));
+    assert.ok(!JSON.stringify(existing.requirements).includes('synthetic-plan-key'));
+    assert.ok(!existing.files.some(file => String(file.content || '').includes('synthetic-plan-key') && !file.secret));
+
+    // A dangling symlink still counts as present: never write through it.
+    await rm(join(home, '.dsh/.credentials.yaml'));
+    await symlink(join(home, 'nowhere'), join(home, '.dsh/.credentials.yaml'));
+    const dangling = await buildInstallPlan(config, options);
+    assert.ok(!dangling.files.some(file => file.path === '.dsh/.credentials.yaml'));
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
 test('rejects relative home and blocks missing selected executable', async () => {
   const config = { apiUrl: 'https://example.org', apiKey: 'key', mcps: [], roles };
   await assert.rejects(buildInstallPlan(config, { targetHome: 'relative' }));
