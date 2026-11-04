@@ -122,3 +122,101 @@ test('clamps maxResults and detects RPC tool error', async () => {
   const p = await provider(async (_url, opts) => { calls++; if (calls === 1) { assert.equal(JSON.parse(opts.body).params.arguments.numResults, 10); return json(rpc({ isError: true })) } return json(parallel) })
   assert.equal((await p.search({ query: 'q', maxResults: 99 })).sources.length, 1); assert.equal(calls, 2)
 })
+
+test('Exa JSON and SSE rate metadata triggers fallback and cooldown', async () => {
+  for (const make of [json, sse]) {
+    let calls = []
+    const p = await provider(async url => { calls.push(url); return url.includes('exa.ai') ? make(rpc({ isError: true, _meta: { 'ai.exa/rateLimited': true } })) : json(parallel) }, { now: () => 1000 })
+    await p.search({ query: 'q' }); await p.search({ query: 'q' })
+    assert.equal(calls.filter(url => url.includes('exa.ai')).length, 1)
+    assert.equal(p.cooldowns.exa, 61000)
+  }
+})
+
+test('only explicit true Exa rate metadata classifies rate limits', async () => {
+  for (const meta of [false, 'true', undefined]) {
+    const p = await provider(async () => json(rpc({ isError: true, _meta: { 'ai.exa/rateLimited': meta }, content: [{ text: 'secret rate limit' }] })), { now: () => 1000 })
+    await assert.rejects(p.search({ query: 'secret query' }), e => e.message.includes('tool error') && !e.message.includes('secret') && e.retryAfterSeconds === undefined)
+    assert.deepEqual(p.cooldowns, { exa: 0, parallel: 0 })
+  }
+  const p = await provider(async url => url.includes('exa.ai') ? new Response('', { status: 503 }) : json(rpc({ isError: true, _meta: { 'ai.exa/rateLimited': true } })))
+  await assert.rejects(p.search({ query: 'q' }), e => e.message.includes('tool error') && e.retryAfterSeconds === undefined)
+})
+
+test('retry after seconds and minimum remaining cooldown', async () => {
+  let now = 1000, calls = 0
+  const p = await provider(async () => { calls++; return new Response('secret body', { status: 429, headers: { 'retry-after': '5' } }) }, { now: () => now })
+  await assert.rejects(p.search({ query: 'secret query' }), e => e.code === 'WEB_SEARCH_FAILED' && e.retryAfterSeconds === 5 && e.message.includes('HTTP 429, retry after 5s') && !e.message.includes('secret'))
+  now += 2000
+  await assert.rejects(p.search({ query: 'q' }), e => e.retryAfterSeconds === 3 && e.message.includes('rate limit cooldown, retry after 3s'))
+  assert.equal(calls, 2)
+  now += 3000; await assert.rejects(p.search({ query: 'q' })); assert.equal(calls, 4)
+})
+
+test('late 429 after timeout cannot mutate cooldown', async () => {
+  let resolveExa
+  const p = await provider(url => url.includes('exa.ai') ? new Promise(resolve => { resolveExa = resolve }) : Promise.resolve(json(parallel)), { exaTimeout: 10, totalTimeout: 1000, now: () => 1000 })
+  await p.search({ query: 'q' })
+  resolveExa(new Response('secret body', { status: 429 }))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(p.cooldowns.exa, 0)
+})
+
+test('numeric RPC errors and malformed envelopes remain distinct and sanitized', async () => {
+  const p = await provider(async url => url.includes('exa.ai') ? json({ jsonrpc: '2.0', id: 1, error: { code: -32600, message: 'secret body' } }) : json({ jsonrpc: '1.0', id: 1, error: { code: -1, message: 'secret' } }))
+  await assert.rejects(p.search({ query: 'secret query' }), e => e.message.includes('JSON-RPC error -32600') && e.message.includes('invalid JSON-RPC envelope') && !e.message.includes('secret') && e.retryAfterSeconds === undefined)
+})
+
+const queryOf = opts => JSON.parse(opts.body).params.arguments.query
+const exaFor = q => rpc({ content: [{ type: 'text', text: `Title: ${q}\nURL: https://${q}.example` }] })
+const tick = () => new Promise(resolve => setTimeout(resolve, 5))
+
+test('gate runs concurrent different queries one at a time with own results', async () => {
+  let active = 0, max = 0
+  const p = await provider(async (_url, opts) => {
+    const q = queryOf(opts); active++; max = Math.max(max, active)
+    await tick(); active--
+    return json(exaFor(q))
+  })
+  const [a, b, c] = await Promise.all(['aaa', 'bbb', 'ccc'].map(q => p.search({ query: q })))
+  assert.equal(max, 1)
+  assert.deepEqual([a, b, c].map(r => r.sources[0].url), ['https://aaa.example/', 'https://bbb.example/', 'https://ccc.example/'])
+})
+
+test('queued calls recheck cooldown after first 429 and Parallel is gated', async () => {
+  let exaCalls = 0, active = 0, max = 0, parallelCalls = 0
+  const p = await provider(async (url, opts) => {
+    if (url.includes('exa.ai')) { exaCalls++; await tick(); return new Response('', { status: 429, headers: { 'retry-after': '30' } }) }
+    parallelCalls++; active++; max = Math.max(max, active); await tick(); active--
+    return json(parallel)
+  })
+  const results = await Promise.all([1, 2, 3].map(i => p.search({ query: `q${i}` })))
+  assert.equal(results.length, 3); assert.equal(exaCalls, 1); assert.equal(parallelCalls, 3); assert.equal(max, 1)
+})
+
+test('queued abort makes no fetch and leaks no slot', async () => {
+  const calls = []; let release
+  const p = await provider(async (_url, opts) => {
+    calls.push(queryOf(opts))
+    if (calls.length === 1) await new Promise(resolve => { release = resolve })
+    return json(exaFor(queryOf(opts)))
+  })
+  const first = p.search({ query: 'first' })
+  await tick()
+  const controller = new AbortController()
+  const queued = p.search({ query: 'queued' }, controller.signal)
+  await tick(); controller.abort()
+  await assert.rejects(queued, { name: 'AbortError' })
+  assert.deepEqual(calls, ['first']); assert.equal(p.gates.exa.waiters.length, 0)
+  release(); await first
+  assert.equal(p.gates.exa.active, 0)
+  assert.equal((await p.search({ query: 'later' })).sources[0].url, 'https://later.example/')
+})
+
+test('queue wait is bounded by phase budget and falls back', async () => {
+  const p = await provider(async url => url.includes('exa.ai') ? new Promise(() => {}) : json(parallel), { exaTimeout: 30, totalTimeout: 1000 })
+  const started = Date.now()
+  const results = await Promise.all([p.search({ query: 'a' }), p.search({ query: 'b' })])
+  assert.equal(results.length, 2); assert.ok(Date.now() - started < 500)
+  assert.equal(p.gates.exa.active, 0); assert.equal(p.gates.exa.waiters.length, 0)
+})

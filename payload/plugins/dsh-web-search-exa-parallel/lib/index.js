@@ -77,15 +77,24 @@ export function parseParallel(result, maxResults = 8) {
   } : null), maxResults)
 }
 
-function envelope(value) {
-  if (!object(value) || value.jsonrpc !== '2.0' || value.id !== 1 || value.error || !object(value.result) || value.result.isError) {
-    throw new Error('invalid or error JSON-RPC response')
+function envelope(value, provider) {
+  if (!object(value) || value.jsonrpc !== '2.0' || value.id !== 1) throw new Error('invalid JSON-RPC envelope')
+  if ('error' in value) {
+    const code = value.error?.code
+    throw new Error(Number.isSafeInteger(code) ? `JSON-RPC error ${code}` : 'JSON-RPC error')
+  }
+  if (!object(value.result)) throw new Error('invalid JSON-RPC result')
+  if (value.result.isError === true) {
+    if (provider === 'exa' && value.result._meta?.['ai.exa/rateLimited'] === true) {
+      const error = new Error('rate limited'); error.code = 'RATE_LIMITED'; throw error
+    }
+    throw new Error('tool error')
   }
   return value.result
 }
 
 // Read only a bounded response. SSE connections can remain open after their result frame.
-async function readResponse(response) {
+async function readResponse(response, provider) {
   const length = response.headers.get('content-length')
   if (length && Number(length) > LIMIT) {
     response.body?.cancel().catch(() => {})
@@ -113,12 +122,14 @@ async function readResponse(response) {
           let parsed
           try { parsed = JSON.parse(data) } catch { throw new Error('invalid SSE JSON') }
           // Ignore notifications and server requests, even if their ID matches.
-          if (object(parsed) && parsed.id === 1 && !('method' in parsed)) return envelope(parsed)
+          if (object(parsed) && parsed.id === 1 && !('method' in parsed)) return envelope(parsed, provider)
         }
       }
     }
     if (sse) throw new Error('missing SSE result')
-    try { return envelope(JSON.parse(buffer)) } catch { throw new Error('invalid JSON-RPC response') }
+    let parsed
+    try { parsed = JSON.parse(buffer) } catch { throw new Error('invalid JSON-RPC response') }
+    return envelope(parsed, provider)
   } finally {
     if (!completed) reader.cancel().catch(() => {})
     reader.releaseLock()
@@ -132,14 +143,51 @@ function cooldownMs(header, now) {
   return Number.isFinite(ms) ? Math.max(0, Math.min(300000, ms)) : 60000
 }
 
+// FIFO gate limiting logical in-flight requests. A fetch that ignores abort cannot be
+// cancelled by JS; its slot is released at the call deadline to avoid deadlock.
+class Gate {
+  constructor(limit) { this.limit = limit; this.active = 0; this.waiters = [] }
+  take() { this.active++; return this.releaser() }
+  releaser() {
+    let done = false
+    return () => {
+      if (done) return
+      done = true
+      const next = this.waiters.shift()
+      if (next) next.grant(); else this.active--
+    }
+  }
+  acquire(signal, waitMs) {
+    if (signal?.aborted) return Promise.reject(abortError())
+    const release = () => this.releaser()
+    if (this.active < this.limit) return Promise.resolve(this.take())
+    return new Promise((resolve, reject) => {
+      const waiter = {}
+      const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort) }
+      const drop = error => {
+        const index = this.waiters.indexOf(waiter)
+        if (index >= 0) this.waiters.splice(index, 1)
+        cleanup(); reject(error)
+      }
+      const onAbort = () => drop(abortError())
+      const timer = setTimeout(() => drop(new Error('timeout')), Math.max(0, waitMs))
+      waiter.grant = () => { cleanup(); resolve(release()) }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      this.waiters.push(waiter)
+    })
+  }
+}
+
 export class ExaParallelSearchProvider {
   id = 'exa-parallel'
-  constructor({ fetch: fetchImpl = globalThis.fetch, now = Date.now, exaTimeout = 12000, totalTimeout = 25000 } = {}) {
+  constructor({ fetch: fetchImpl = globalThis.fetch, now = Date.now, exaTimeout = 12000, totalTimeout = 25000, concurrency = 1 } = {}) {
     this.fetch = fetchImpl
     this.now = now
     this.exaTimeout = exaTimeout
     this.totalTimeout = totalTimeout
     this.cooldowns = { exa: 0, parallel: 0 }
+    const limit = Number.isInteger(concurrency) && concurrency >= 1 ? concurrency : 1
+    this.gates = { exa: new Gate(limit), parallel: new Gate(limit) }
   }
   available() { return true }
 
@@ -160,11 +208,17 @@ export class ExaParallelSearchProvider {
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: provider === 'exa' ? 'web_search_exa' : 'web_search', arguments: args } }),
       })
       if (!response.ok) {
-        if (response.status === 429) this.cooldowns[provider] = this.now() + cooldownMs(response.headers.get('retry-after'), this.now())
         response.body?.cancel().catch(() => {})
-        throw new Error(`HTTP ${response.status}`)
+        const error = new Error(`HTTP ${response.status}`)
+        if (response.status === 429) { error.code = 'RATE_LIMITED'; error.retryMs = cooldownMs(response.headers.get('retry-after'), this.now()) }
+        throw error
       }
-      const result = await readResponse(response)
+      let result
+      try { result = await readResponse(response, provider) }
+      catch (error) {
+        if (error.code === 'RATE_LIMITED') error.retryMs = cooldownMs(response.headers.get('retry-after'), this.now())
+        throw error
+      }
       const parsed = provider === 'exa' ? parseExa(result, maxResults) : parseParallel(result, maxResults)
       if (!parsed.sources.length) throw new Error('no usable sources')
       return parsed
@@ -179,23 +233,46 @@ export class ExaParallelSearchProvider {
     const value = request.maxResults
     const maxResults = typeof value === 'number' && Number.isFinite(value) ? Math.max(1, Math.min(10, Math.floor(value))) : 8
     const started = performance.now()
-    const errors = []
+    const errors = [], rateRetries = []
     for (const provider of ['exa', 'parallel']) {
       if (signal?.aborted) throw abortError()
-      if (this.cooldowns[provider] > this.now()) { errors.push(`${provider}: rate limit cooldown`); continue }
+      if (this.cooldowns[provider] > this.now()) {
+        const retry = Math.ceil((this.cooldowns[provider] - this.now()) / 1000)
+        rateRetries.push(provider); errors.push(`${provider}: rate limit cooldown, retry after ${retry}s`); continue
+      }
       const remaining = this.totalTimeout - (performance.now() - started)
       if (remaining <= 0) { errors.push(`${provider}: overall timeout`); break }
+      const phase = provider === 'exa' ? Math.min(this.exaTimeout, remaining) : remaining
+      const phaseStart = performance.now()
+      let release
       try {
-        return await this.call(provider, request.query, maxResults, signal, provider === 'exa' ? Math.min(this.exaTimeout, remaining) : remaining)
+        const gate = this.gates[provider]
+        // Free slot: take it synchronously so an immediate abort still reaches fetch's signal.
+        release = gate.active < gate.limit ? gate.take() : await gate.acquire(signal, phase)
+        if (signal?.aborted) throw abortError()
+        if (this.cooldowns[provider] > this.now()) {
+          const retry = Math.ceil((this.cooldowns[provider] - this.now()) / 1000)
+          rateRetries.push(provider); errors.push(`${provider}: rate limit cooldown, retry after ${retry}s`); continue
+        }
+        const left = phase - (performance.now() - phaseStart)
+        if (left <= 0) throw new Error('timeout')
+        return await this.call(provider, request.query, maxResults, signal, left)
       } catch (error) {
         if (signal?.aborted) throw abortError()
+        if (error?.code === 'RATE_LIMITED') {
+          this.cooldowns[provider] = Math.max(this.cooldowns[provider], this.now() + error.retryMs)
+          rateRetries.push(provider)
+          errors.push(`${provider}: ${error.message === 'HTTP 429' ? 'HTTP 429' : 'rate limited'}, retry after ${Math.ceil(Math.max(0, this.cooldowns[provider] - this.now()) / 1000)}s`)
+          continue
+        }
         // Never expose upstream error text, URLs, request data, or response bodies.
-        const message = error instanceof Error && /^(timeout|HTTP \d{3}|response too large|empty response|invalid .*|missing SSE result|no usable sources)$/.test(error.message) ? error.message : 'network or protocol failure'
+        const message = error instanceof Error && /^(timeout|HTTP \d{3}|response too large|empty response|invalid (?:Exa response|Parallel response|SSE JSON|JSON-RPC (?:response|envelope|result))|JSON-RPC error(?: -?\d+)?|tool error|missing SSE result|no usable sources)$/.test(error.message) ? error.message : 'network or protocol failure'
         errors.push(`${provider}: ${message}`)
-      }
+      } finally { release?.() }
     }
     const error = new Error(`Web search failed (${errors.join('; ')})`)
     error.code = 'WEB_SEARCH_FAILED'
+    if (rateRetries.length === errors.length && rateRetries.length === 2) error.retryAfterSeconds = Math.ceil(Math.max(0, Math.min(...rateRetries.map(provider => this.cooldowns[provider] - this.now()))) / 1000)
     throw error
   }
 }
