@@ -115,8 +115,8 @@ test('one discovered unknown model supports every role and is the only installed
   assert.equal(response.status, 200);
   const patch = await readFile(join(home, '.dsh/profiles/desktop/cordis.patch.yml'), 'utf8');
   assert.match(patch, /custom-model/);
-  // Known catalog is kept as metadata seed only; runtime discovery decides which models are offered.
-  assert.match(patch, /"discoverModels": true/);
+  // Known catalog plus install-time discovered ids form the initial list; no automatic discovery keys.
+  assert.doesNotMatch(patch, /discoverModels|modelsMaxAgeMs|modelsTimeoutMs/);
   const seedIds = JSON.parse(patch.replace(/!!js ("(?:\\.|[^"\\])*")/, '$1')).find(row => row.id === 'llm-pi-ai').config.providers.cliproxy.models.map(m => m.id);
   assert.deepEqual(seedIds, [...catalog.map(m => m.id), 'custom-model']);
 });

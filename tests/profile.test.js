@@ -36,9 +36,9 @@ test('generates fresh profile with exact routes and scoped shared grants', () =>
   assert.match(provider.headers.Authorization, /installer\/cliproxy-key/);
   assert.equal(provider.models[0].id, 'claude-opus-5-5');
   for (const model of provider.models) assert.deepEqual(model.input, ['text', 'image'], model.id);
-  assert.equal(provider.discoverModels, true);
-  assert.equal(provider.modelsMaxAgeMs, 300000);
-  assert.equal(provider.modelsTimeoutMs, 5000);
+  assert.equal(provider.discoverModels, undefined);
+  assert.equal(provider.modelsMaxAgeMs, undefined);
+  assert.equal(provider.modelsTimeoutMs, undefined);
   assert.equal(provider.modelOverrides, undefined);
   assert.deepEqual(provider.models.map(m => m.id), models.map(m => m.id));
   const slim = rows.find(row => row.id === 'oh-my-dsh-slim').config;

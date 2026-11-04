@@ -25,7 +25,7 @@ test('payload contains curated code, package entrypoints and licenses', () => {
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
     for (const entry of [pkg.main, ...Object.values(pkg.exports)]) assert.ok(existsSync(resolve(dir, entry)), `${pkg.name}: ${entry}`)
   }
-  for (const file of ['bundles/dsh-integrations/lib/mcp-client.LICENSE', 'plugins/oh-my-dsh-slim/LICENSE', 'plugins/oh-my-dsh-slim/preset/LICENSE', 'plugins/oh-my-dsh-slim/cordis.patch.yml', 'plugins/zstd-render/index.js', 'plugins/cliproxy-models/index.js']) {
+  for (const file of ['bundles/dsh-integrations/lib/mcp-client.LICENSE', 'plugins/oh-my-dsh-slim/LICENSE', 'plugins/oh-my-dsh-slim/preset/LICENSE', 'plugins/oh-my-dsh-slim/cordis.patch.yml', 'plugins/zstd-render/index.js']) {
     assert.ok(existsSync(join(payload, file)), file)
   }
   assert.match(readFileSync(join(slim, 'LICENSE'), 'utf8'), /MIT License/i)

@@ -18,11 +18,8 @@ test('plan includes curated files and protects credentials', async () => {
   assert.match(plan.files.find(file => file.path === '.dsh/profiles/desktop/cordis.patch.yml').content, /127\.0\.0\.1:19123\/v1/);
   assert.equal(plan.files.filter(file => file.type === 'symlink').length, 3);
   const ops = JSON.parse(patch.replace(/!!js ("(?:\\.|[^"\\])*")/g, '$1'));
-  const sync = ops[0].insert.find(row => row.id === 'cliproxy-models');
-  assert.equal(sync.name, '/test/.dsh/plugins/cliproxy-models/index.js');
-  assert.deepEqual({ ...sync.config, seed: undefined }, { provider: 'cliproxy', intervalMs: 300000, timeoutMs: 5000, seed: undefined });
-  assert.ok(sync.config.seed.some(model => model.id === 'claude-opus-5-5'));
-  assert.ok(plan.files.some(file => file.path === '.dsh/plugins/cliproxy-models/index.js'));
+  assert.ok(!ops[0].insert.some(row => row.id === 'cliproxy-models'));
+  assert.ok(!plan.files.some(file => file.path.includes('cliproxy-models')));
   assert.deepEqual(ops[1], { id: 'web-search-exa-parallel', name: 'dsh-web-search-exa-parallel' });
   assert.deepEqual(ops[2], { id: 'web', name: '@deepseek-ai/dsh-web', config: { searchProvider: 'exa-parallel', fetchProvider: 'http' } });
   assert.ok(!ops[0].insert.some(row => row.id === 'web-search-exa-parallel'));
