@@ -3,8 +3,8 @@
 # Только проверка окружения: ... | bash -s -- --check
 set -euo pipefail
 
-VERSION='1.1.5'
-SHA256='efc12f9a8914fa6a577eeb2f7ac8eeb939d2e985d67e5a23eb7c78714c5cb257'
+VERSION='1.1.6'
+SHA256='0937883fc6ad104acaf7c6f2c9b785d656b8a2a87806059e25419c5d6b2d9709'
 REPO='egor-malishevski/dsh-installer'
 
 # Официальная сборка DeepSeek Harness (Apple Silicon) и её SHA-512 из фида обновлений DeepSeek.
