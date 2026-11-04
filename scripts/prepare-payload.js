@@ -37,7 +37,7 @@ try {
   for (const dir of [integrations, slim, relay]) mkdirSync(dir, { recursive: true })
   for (const item of ['package.json', 'lib', 'client']) copy(join(sources['--integrations'], item), join(integrations, item))
   // Keep the pinned search bundle across payload refreshes and retire the legacy adapter.
-  copy(join(destination, 'plugins/dsh-web-search-multi'), join(staging, 'plugins/dsh-web-search-multi'))
+  copy(join(destination, 'plugins/dsh-web-search-exa-parallel'), join(staging, 'plugins/dsh-web-search-exa-parallel'))
   const integrationManifestPath = join(integrations, 'package.json')
   const integrationManifest = JSON.parse(readFileSync(integrationManifestPath, 'utf8'))
   if (integrationManifest.exports) delete integrationManifest.exports['./web-search-account']

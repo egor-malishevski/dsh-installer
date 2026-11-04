@@ -79,9 +79,9 @@ test('allowlisted links roll back and arbitrary links are rejected', async t => 
   await assert.rejects(installPlan({ targetHome: home, files: [payload, { ...link, target: '../../../../../../etc' }] }, callbacks()), code('INVALID_PLAN'));
   await assert.rejects(installPlan({ targetHome: home, files: [payload, link] }, { ...callbacks(), afterWrite: async p => { if (p === link.path) throw new Error('fail'); } }), code('INSTALL_FAILED'));
   assert.deepEqual(await readdir(home), []);
-  const searchPayload = { path: '.dsh/plugins/dsh-web-search-multi/package.json', content: '{}', secret: false };
-  const searchLink = { type: 'symlink', path: '.dsh/profiles/desktop/node_modules/dsh-web-search-multi', target: '../../../plugins/dsh-web-search-multi' };
+  const searchPayload = { path: '.dsh/plugins/dsh-web-search-exa-parallel/package.json', content: '{}', secret: false };
+  const searchLink = { type: 'symlink', path: '.dsh/profiles/desktop/node_modules/dsh-web-search-exa-parallel', target: '../../../plugins/dsh-web-search-exa-parallel' };
   await assert.rejects(installPlan({ targetHome: home, files: [searchPayload, { ...searchLink, target: '../../../plugins/other' }] }, callbacks()), code('INVALID_PLAN'));
   assert.equal((await installPlan({ targetHome: home, files: [searchPayload, searchLink] }, callbacks())).ok, true);
-  assert.equal(await realpath(path.join(home, searchLink.path)), await realpath(path.join(home, '.dsh/plugins/dsh-web-search-multi')));
+  assert.equal(await realpath(path.join(home, searchLink.path)), await realpath(path.join(home, '.dsh/plugins/dsh-web-search-exa-parallel')));
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -10,25 +10,25 @@ const anchor = process.env.DSH_PACKAGED_ANCHOR;
 // Plain Node cannot inspect paths inside Electron's app.asar.
 const available = electron && anchor && existsSync(electron);
 
-test('packaged Electron loader imports multi-search and registers with a stub web service', { skip: available ? false : 'DSH_ELECTRON and DSH_PACKAGED_ANCHOR must point to packaged host files' }, () => {
-  const plugin = fileURLToPath(new URL('../payload/plugins/dsh-web-search-multi/lib/index.js', import.meta.url));
+test('packaged Electron loader imports and registers the fixed search provider', { skip: available ? false : 'DSH_ELECTRON and DSH_PACKAGED_ANCHOR must point to packaged host files' }, () => {
+  const plugin = fileURLToPath(new URL('../payload/plugins/dsh-web-search-exa-parallel/lib/index.js', import.meta.url));
+  const patch = readFileSync(fileURLToPath(new URL('../payload/plugins/dsh-web-search-exa-parallel/cordis.patch.yml', import.meta.url)), 'utf8');
+  assert.match(patch, /searchProvider:\s*exa-parallel/);
+  assert.match(patch, /fetchProvider:\s*http/);
   const program = `
     import { createRequire } from 'node:module';
     import { pathToFileURL } from 'node:url';
     import assert from 'node:assert/strict';
     const [anchor, plugin] = process.argv.slice(1);
     const loader = createRequire(anchor)('@deepseek-ai/cordis-plugin-loader').ModuleLoader.fromInternal();
-    assert.ok(loader, 'packaged ModuleLoader unavailable');
     const search = await loader.import(pathToFileURL(plugin).href, import.meta.url, {});
-    assert.equal(search.name, 'dsh-web-search-multi');
+    assert.equal(search.name, 'dsh-web-search-exa-parallel');
     assert.deepEqual(search.inject, ['web']);
+    assert.equal(search.Config, undefined);
     let registered;
-    const ctx = { web: { registerSearchProvider(provider) { registered = provider; } }, inject() {}, get() {} };
-    search.apply(ctx, { provider: 'bing', enableFallback: false });
-    assert.equal(registered.id, 'multi-search');
-    assert.equal(registered.configProvider().provider, 'bing');
-    assert.equal(registered.configProvider().enableFallback, false);
-    assert.ok(search.Config);
+    search.apply({ web: { registerSearchProvider(provider) { registered = provider; } } });
+    assert.equal(registered.id, 'exa-parallel');
+    assert.equal(registered.available(), true);
   `;
   const result = spawnSync(electron, ['--input-type=module', '-e', program, path.resolve(anchor), plugin], {
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 15000,

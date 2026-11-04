@@ -39,11 +39,11 @@ test('installed profile resolves and parses in the packaged host without activat
   const dir = path.join(dshHome, 'profiles/desktop');
   const integrationDir = path.join(dshHome, 'bundles/dsh-integrations');
   const slimDir = path.join(dshHome, 'plugins/oh-my-dsh-slim');
-  const searchDir = path.join(dshHome, 'plugins/dsh-web-search-multi');
-  for (const [name, target] of [['dsh-integrations', integrationDir], ['dsh-web-search-multi', searchDir], ['oh-my-dsh-slim', slimDir]]) {
+  const searchDir = path.join(dshHome, 'plugins/dsh-web-search-exa-parallel');
+  for (const [name, target] of [['dsh-integrations', integrationDir], ['dsh-web-search-exa-parallel', searchDir], ['oh-my-dsh-slim', slimDir]]) {
     assert.equal(await realpath(path.join(dir, 'node_modules', name)), await realpath(target));
   }
-  const bundleNames = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-web-search-multi', 'dsh-integrations', 'oh-my-dsh-slim'];
+  const bundleNames = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-web-search-exa-parallel', 'dsh-integrations', 'oh-my-dsh-slim'];
   for (const name of bundleNames) assert.ok(boot.resolveBundleDir('test', name, anchor, dir));
   const profile = boot.loadProfile('test', 'desktop', anchor, dshHome);
   assert.deepEqual(profile.skippedBundles, []);
@@ -52,11 +52,10 @@ test('installed profile resolves and parses in the packaged host without activat
   const integration = profile.layers.find(layer => layer.packageName === 'dsh-integrations');
   const rows = integration.patches.flatMap(p => p.insert || []);
   assert.deepEqual(rows.filter(r => r.id.startsWith('mcp-')).map(r => r.id), ['mcp-gitlab', 'mcp-jira', 'mcp-memory', 'mcp-figma', 'mcp-context7']);
-  assert.ok(!rows.some(r => r.id === 'web-search-account' || r.id === 'web-search-multi'));
+  assert.ok(!rows.some(r => r.id === 'web-search-account' || r.id === 'web-search-exa-parallel'));
   const composed = boot.composeEntries([patches]);
-  assert.equal(composed.filter(r => r.id === 'web-search-multi').length, 1);
-  assert.deepEqual(composed.find(r => r.id === 'web-search-multi').config, { provider: 'bing', enableFallback: false });
-  assert.equal(composed.find(r => r.id === 'web').config.searchProvider, 'multi-search');
+  assert.equal(composed.filter(r => r.id === 'web-search-exa-parallel').length, 1);
+  assert.equal(composed.find(r => r.id === 'web').config.searchProvider, 'exa-parallel');
   assert.equal(composed.find(r => r.id === 'web').config.fetchProvider, 'http');
   assert.equal(typeof rows.find(r => r.id === 'mcp-figma').config.env.FIGMA_API_KEY.__jsExpr, 'string');
   for (const id of ['gitlab', 'jira']) {
@@ -106,7 +105,8 @@ test('installed profile resolves and parses in the packaged host without activat
   statusModule.dispose('mcp-gitlab', statusToken);
   const slimModule = await import(url(path.join(slimDir, 'lib/index.js')));
   const searchManifest = JSON.parse(await readFile(path.join(searchDir, 'package.json'), 'utf8'));
-  assert.equal(searchManifest.exports['./client'].default, './lib/client.js');
+  assert.equal(searchManifest.exports['.'], './lib/index.js');
+  assert.equal(searchManifest.exports['./client'], undefined);
   const integrationManifest = JSON.parse(await readFile(path.join(integrationDir, 'package.json'), 'utf8'));
   assert.equal(integrationManifest.exports['./web-search-account'], undefined);
   assert.equal(typeof adapter.apply, 'function');

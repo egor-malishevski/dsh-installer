@@ -1,0 +1,8 @@
+- insert:
+    - id: web-search-exa-parallel
+      name: dsh-web-search-exa-parallel
+- id: web
+  name: '@deepseek-ai/dsh-web'
+  config:
+    searchProvider: exa-parallel
+    fetchProvider: http

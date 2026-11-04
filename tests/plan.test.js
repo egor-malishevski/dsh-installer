@@ -18,8 +18,9 @@ test('plan includes curated files and protects credentials', async () => {
   assert.match(plan.files.find(file => file.path === '.dsh/profiles/desktop/cordis.patch.yml').content, /127\.0\.0\.1:19123\/v1/);
   assert.equal(plan.files.filter(file => file.type === 'symlink').length, 3);
   const ops = JSON.parse(patch.replace(/!!js ("(?:\\.|[^"\\])*")/g, '$1'));
-  assert.deepEqual(ops[1], { id: 'web-search-multi', name: 'dsh-web-search-multi', config: { provider: 'bing', enableFallback: false } });
-  assert.deepEqual(ops[2], { id: 'web', name: '@deepseek-ai/dsh-web', config: { searchProvider: 'multi-search', fetchProvider: 'http' } });
+  assert.deepEqual(ops[1], { id: 'web-search-exa-parallel', name: 'dsh-web-search-exa-parallel' });
+  assert.deepEqual(ops[2], { id: 'web', name: '@deepseek-ai/dsh-web', config: { searchProvider: 'exa-parallel', fetchProvider: 'http' } });
+  assert.ok(!ops[0].insert.some(row => row.id === 'web-search-exa-parallel'));
   assert.ok(!plan.files.some(file => file.path.endsWith('/web-search-account.js')));
   const manifest = JSON.parse(plan.files.find(file => file.path === '.dsh/bundles/dsh-integrations/package.json').content);
   assert.equal(manifest.exports['./web-search-account'], undefined);

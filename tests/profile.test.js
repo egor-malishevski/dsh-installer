@@ -16,8 +16,8 @@ test('generates fresh profile with exact routes and scoped shared grants', () =>
   assert.ok(files.every(file => file.secret === false));
   const pkg = JSON.parse(files[0].content);
   assert.equal(pkg.dependencies['dsh-integrations'], 'link:../../bundles/dsh-integrations');
-  assert.equal(pkg.dependencies['dsh-web-search-multi'], 'link:../../plugins/dsh-web-search-multi');
-  assert.ok(pkg.dsh.profile.bundles.indexOf('dsh-web-search-multi') < pkg.dsh.profile.bundles.indexOf('dsh-integrations'));
+  assert.equal(pkg.dependencies['dsh-web-search-exa-parallel'], 'link:../../plugins/dsh-web-search-exa-parallel');
+  assert.ok(pkg.dsh.profile.bundles.indexOf('dsh-web-search-exa-parallel') < pkg.dsh.profile.bundles.indexOf('dsh-integrations'));
   const content = files[1].content;
   assert.doesNotMatch(content, /private-key-test|private\.example|alfagen/i);
   const json = content.replace(/!!js ("(?:\\.|[^"\\])*")/, '$1');
