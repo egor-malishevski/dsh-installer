@@ -114,5 +114,9 @@ test('one discovered unknown model supports every role and is the only installed
   const response = await post('install', { ...config, roles: preview.roles });
   assert.equal(response.status, 200);
   const patch = await readFile(join(home, '.dsh/profiles/desktop/cordis.patch.yml'), 'utf8');
-  assert.match(patch, /custom-model/); assert.doesNotMatch(patch, /gpt-6\.1-sol|claude-opus-5-5/);
+  assert.match(patch, /custom-model/);
+  // Known catalog is kept as metadata seed only; runtime discovery decides which models are offered.
+  assert.match(patch, /"discoverModels": true/);
+  const seedIds = JSON.parse(patch.replace(/!!js ("(?:\\.|[^"\\])*")/, '$1')).find(row => row.id === 'llm-pi-ai').config.providers.cliproxy.models.map(m => m.id);
+  assert.deepEqual(seedIds, [...catalog.map(m => m.id), 'custom-model']);
 });

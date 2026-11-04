@@ -5,7 +5,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { roles } from '../lib/config.js';
-import { generateProfile } from '../lib/profile.js';
+import { generateProfile, models } from '../lib/profile.js';
+
+test('seed keeps known catalog and adds discovered unknown ids as multimodal', () => {
+  const custom = { id: 'custom-x', name: 'custom-x', input: ['text', 'image'] };
+  const rows = JSON.parse(generateProfile(config, { ...options, availableModels: [models[0], custom] })[1].content.replace(/!!js ("(?:\\.|[^"\\])*")/, '$1'));
+  const seed = rows.find(row => row.id === 'llm-pi-ai').config.providers.cliproxy.models;
+  assert.deepEqual(seed.map(m => m.id), [...models.map(m => m.id), 'custom-x']);
+  assert.deepEqual(seed.at(-1).input, ['text', 'image']);
+});
 
 const config = { roles: structuredClone(roles), apiKey: 'private-key-test', apiUrl: 'https://private.example/v1', mcps: [] };
 const options = { targetHome: '/home/example "quoted"', sharedMcpTools: { oracle: ['mcp__jira__jira_get_issue'] } };
@@ -28,6 +36,11 @@ test('generates fresh profile with exact routes and scoped shared grants', () =>
   assert.match(provider.headers.Authorization, /installer\/cliproxy-key/);
   assert.equal(provider.models[0].id, 'claude-opus-5-5');
   for (const model of provider.models) assert.deepEqual(model.input, ['text', 'image'], model.id);
+  assert.equal(provider.discoverModels, true);
+  assert.equal(provider.modelsMaxAgeMs, 300000);
+  assert.equal(provider.modelsTimeoutMs, 5000);
+  assert.equal(provider.modelOverrides, undefined);
+  assert.deepEqual(provider.models.map(m => m.id), models.map(m => m.id));
   const slim = rows.find(row => row.id === 'oh-my-dsh-slim').config;
   assert.deepEqual(slim.orchestrator, { effort: 'high' });
   assert.deepEqual(slim.roles.oracle.sharedMcpTools, ['mcp__jira__jira_get_issue']);
