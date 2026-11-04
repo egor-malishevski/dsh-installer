@@ -30,6 +30,9 @@ test('HTTP clean install commits payload without exposing the key, and refuses a
   assert.equal(await readlink(join(home, '.dsh/profiles/desktop/node_modules/dsh-integrations')), '../../../bundles/dsh-integrations');
   const integrationPatch = JSON.parse(await readFile(join(home, '.dsh/bundles/dsh-integrations/cordis.patch.yml'), 'utf8'));
   assert.equal(integrationPatch[0].insert[0].config.port, port);
+  assert.equal(await readlink(join(home, '.dsh/profiles/desktop/node_modules/dsh-web-search-multi')), '../../../plugins/dsh-web-search-multi');
+  assert.deepEqual(integrationPatch[1].config, { provider: 'bing', enableFallback: false });
+  assert.deepEqual(integrationPatch[2].config, { searchProvider: 'multi-search', fetchProvider: 'http' });
   const profile = await readFile(join(home, '.dsh/profiles/desktop/cordis.patch.yml'), 'utf8');
   assert.ok(profile.includes(`127.0.0.1:${port}/v1`));
   const retry = await fetch(instance.origin + '/api/install', { method: 'POST', headers, body: JSON.stringify({ config }) });

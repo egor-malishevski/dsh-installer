@@ -36,6 +36,13 @@ try {
   const relay = join(staging, 'plugins/zstd-render')
   for (const dir of [integrations, slim, relay]) mkdirSync(dir, { recursive: true })
   for (const item of ['package.json', 'lib', 'client']) copy(join(sources['--integrations'], item), join(integrations, item))
+  // Keep the pinned search bundle across payload refreshes and retire the legacy adapter.
+  copy(join(destination, 'plugins/dsh-web-search-multi'), join(staging, 'plugins/dsh-web-search-multi'))
+  const integrationManifestPath = join(integrations, 'package.json')
+  const integrationManifest = JSON.parse(readFileSync(integrationManifestPath, 'utf8'))
+  if (integrationManifest.exports) delete integrationManifest.exports['./web-search-account']
+  writeFileSync(integrationManifestPath, JSON.stringify(integrationManifest, null, 2) + '\n')
+  rmSync(join(integrations, 'lib/web-search-account.js'), { force: true })
   const editorPath = join(integrations, 'lib/editor.js')
   const editor = readFileSync(editorPath, 'utf8')
   const sourceServers = "const SERVERS = new Set(['mcp-obscura', 'mcp-bitbucket', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-sequential-thinking', 'mcp-memory', 'mcp-google-sheets', 'mcp-figma']);"

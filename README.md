@@ -60,9 +60,9 @@ curl -fsSL https://raw.githubusercontent.com/egor-malishevski/dsh-installer/main
 
 Для Figma нужен персональный токен Figma. API-ключ Context7 необязателен: без него действуют бесплатные лимиты запросов.
 
-## Веб-поиск через DeepSeek Account
+## Веб-поиск через Bing
 
-Плагин `web-search-account` включает инструмент `web_search` во всех сессиях, на какой бы модели они ни работали. Поиск идёт через вход в DeepSeek Account внутри Harness, поэтому без входа в аккаунт поиск работать не будет. Загрузка страниц (`web_fetch`) идёт напрямую по HTTP.
+Плагин [cinob/dsh-web-search-multi](https://github.com/cinob/dsh-web-search-multi) включает `web_search` независимо от модели и входа в DeepSeek Account. По умолчанию выбран Bing без автоматического переключения на другие поисковые системы; `web_fetch` загружает страницы напрямую по HTTP. Запросы отправляются в Bing и зависят от его доступности. В payload включена версия 0.1.0 (MIT), commit `9821080e36dbd81dd75fd582fb687944244ec293`.
 
 ## Что не переносится
 
