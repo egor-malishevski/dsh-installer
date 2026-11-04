@@ -218,6 +218,11 @@ window.__ModuleLoader__.load({
       'read', 'write', 'edit', 'read_image', 'glob', 'grep', 'bash', 'pwsh',
       'web_search', 'web_fetch', 'skill', 'job_kill', 'job_list', 'job_output',
       'todo_write', 'ask_user_question', 'present',
+      'create_goal', 'get_goal', 'update_goal', 'exit_plan_mode',
+      'list_agents', 'interrupt_agent', 'send_message', 'subagent_result',
+      'subagent_oracle', 'subagent_designer', 'subagent_fixer', 'subagent_explorer',
+      'subagent_librarian', 'subagent_observer', 'subagent_councillor_alpha',
+      'subagent_councillor_beta', 'subagent_councillor_gamma', 'subagent_council',
     ];
     // Councillor seats carry a read-only ceiling; the synthesizer is tool-less.
     const FIXED_ALLOW = ['read', 'glob', 'grep'];

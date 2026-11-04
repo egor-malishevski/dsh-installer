@@ -53,6 +53,19 @@ try {
   for (const item of ['LICENSE', 'README.md', 'NOTICE', 'NOTICE.md']) copy(join(sources['--integrations'], item), join(integrations, item), false)
   for (const item of ['package.json', 'lib', 'preset', 'client', 'cordis.patch.yml', 'LICENSE']) copy(join(sources['--slim'], item), join(slim, item))
   for (const item of ['README.md', 'NOTICE', 'NOTICE.md']) copy(join(sources['--slim'], item), join(slim, item), false)
+  // Never silently replace the curated role policy with an unpatched upstream copy.
+  // Supply the hardened plugin (or this repository's payload) as --slim.
+  const slimDefaults = JSON.parse(readFileSync(join(slim, 'preset/defaults.json'), 'utf8'))
+  for (const roles of Object.values(slimDefaults.presets ?? {})) {
+    for (const role of ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer']) {
+      const deny = roles[role]?.deny ?? []
+      for (const tool of ['create_goal', 'get_goal', 'update_goal', 'exit_plan_mode', 'list_agents', 'interrupt_agent', 'subagent_result', 'subagent_fixer', 'subagent_oracle', 'subagent_designer', 'subagent_explorer', 'subagent_librarian', 'subagent_observer', 'subagent_councillor_alpha', 'subagent_councillor_beta', 'subagent_councillor_gamma', 'subagent_council']) {
+        if (!deny.includes(tool)) throw new Error(`Slim hardening missing: ${role}.deny must include ${tool}; use the curated plugin as --slim`)
+      }
+    }
+  }
+  if (!Object.keys(slimDefaults.presets ?? {}).length) throw new Error('Slim hardening missing: no presets')
+  if (!readFileSync(join(slim, 'preset/preset.js'), 'utf8').includes('SLIM_FILE_POLICY_V1')) throw new Error('Slim hardening missing: file operation policy; use the curated plugin as --slim')
 
   const relaySource = readFileSync(sources['--relay'], 'utf8')
   const defaultPattern = /(^\s*upstream:\s*)'https:\/\/[^'\s]+'(,\s*)$/m

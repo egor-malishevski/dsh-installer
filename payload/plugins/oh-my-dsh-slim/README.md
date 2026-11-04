@@ -90,8 +90,16 @@ retained. See [LICENSE](./LICENSE). 中文版见 [README.zh.md](./README.zh.md).
   declared default). A pinned route never inherits the session's cap. Temperature, tools, prompts
   and MCP stay per role: they describe the specialist, not the route.
 - Roles inherit global tools. Read-only roles deny `edit`/`write`; all roles deny control tools
-  (`skill`, `job_kill`, `job_list`, `job_output`, `todo_write`, `ask_user_question`).
-  Further delegation is disabled (`maxDepth: 1`).
+  (`skill`, `job_kill`, `job_list`, `job_output`, `todo_write`, `ask_user_question`),
+  goal/plan controls, agent listing/interruption, `subagent_result`, and every shipped
+  `subagent_*` tool. `send_message` remains available to report to the parent.
+  Further delegation is disabled (`maxDepth: 1`) and its tools are hidden from children.
+- Installer hardening: use glob/grep/read for inspection and edit/write for source,
+  configuration and documentation changes. Shell is for execution and diagnostics,
+  not a workaround for file-tool refusals. This is prompt guidance, not a shell
+  command security boundary. Read-only roles retain non-mutating diagnostic shell
+  access and explicitly configured MCP grants. Bounded QA is routed to Fixer with
+  explicit validation criteria; validation-only tasks must not change source files.
 - **observer is reserved and force-disabled**: delegation prompts are text-only, and the host
   gates pasted images by the main model's vision capability. Use a vision-capable main model
   directly until attachment forwarding is supported.
