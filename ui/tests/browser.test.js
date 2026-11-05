@@ -674,6 +674,7 @@ async function openUpdate(page, srv) {
   await page.waitForSelector('#mode-update');
   await page.click('#mode-update');
   await page.waitForSelector('#btn-update-preview');
+  if (srv.options.updateScope !== false) await page.selectOption('#update-scope', srv.options.updateScope || 'all');
 }
 const updateCalls = (srv) => srv.log.requests.filter((r) => r.path === '/api/update');
 
@@ -689,7 +690,7 @@ test('обновление: предпросмотр, подтверждение
     assert.match(await page.textContent('#update-deps-note'), /не запускает npm/);
     await page.click('#btn-update-preview');
     await page.waitForSelector('#update-plan');
-    assert.deepEqual(updateCalls(srv).map((r) => r.body), [{ dryRun: true, migrateNativeFallbacks: false }]);
+    assert.deepEqual(updateCalls(srv).map((r) => r.body), [{ dryRun: true, scope: 'all', seedNativeFallbacks: false, migrateNativeFallbacks: false }]);
     const plan = await page.textContent('#update-plan');
     assert.match(plan, /profiles\/desktop\/config\.json/);
     assert.match(plan, /Заменить/);
@@ -703,7 +704,7 @@ test('обновление: предпросмотр, подтверждение
     await page.waitForSelector('#update-backup');
     assert.equal(await page.textContent('#update-backup'), '/tmp/dsh-backup-update');
     assert.match(await page.textContent('#update-restart'), /Запустите Harness заново/);
-    assert.deepEqual(updateCalls(srv)[1].body, { dryRun: false, planHash: 'plan-hash-1', acknowledgeManagedFiles: true, migrateNativeFallbacks: false });
+    assert.deepEqual(updateCalls(srv)[1].body, { dryRun: false, scope: 'all', seedNativeFallbacks: false, planHash: 'plan-hash-1', acknowledgeManagedFiles: true, migrateNativeFallbacks: false });
     assert.equal(srv.log.requests.filter((r) => r.path === '/api/install').length, 0);
     // Режим установки сохранён
     await page.click('#mode-install');
@@ -749,7 +750,7 @@ test('обновление: устаревший план — отказ, сбр
     assert.equal(await page.isDisabled('#btn-update-apply'), true);
     const calls = updateCalls(srv).map((r) => r.body);
     assert.equal(calls.length, 3);
-    assert.deepEqual(calls[2], { dryRun: true, migrateNativeFallbacks: false });
+    assert.deepEqual(calls[2], { dryRun: true, scope: 'all', seedNativeFallbacks: false, migrateNativeFallbacks: false });
     await page.check('#update-ack'); await page.click('#btn-update-apply');
     await page.waitForSelector('#update-backup');
     assert.equal(updateCalls(srv)[3].body.planHash, 'plan-hash-2');
@@ -776,6 +777,31 @@ test('обновление: ошибка применения не раскры�
   } finally { await browser.close(); await srv.close(); }
 });
 
+test('обновление: только Slim, резервы и сброс очистки', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  const srv = await listen({ updateScope: false });
+  try {
+    const page = await browser.newPage();
+    await openUpdate(page, srv);
+    assert.equal(await page.isDisabled('#btn-update-preview'), true);
+    await page.selectOption('#update-scope', 'all');
+    await page.check('#update-cleanup');
+    await page.selectOption('#update-scope', 'slim');
+    assert.equal(await page.isChecked('#update-cleanup'), false);
+    assert.equal(await page.isDisabled('#update-cleanup'), true);
+    await page.check('#update-seed');
+    await page.click('#btn-update-preview'); await page.waitForSelector('#update-plan');
+    await page.check('#update-ack');
+    await page.selectOption('#update-scope', 'all');
+    assert.equal(await page.locator('#update-plan').count(), 0);
+    assert.equal(await page.isChecked('#update-cleanup'), false);
+    const calls = updateCalls(srv).map((r) => r.body);
+    assert.deepEqual(calls[0], { dryRun: true, scope: 'slim', seedNativeFallbacks: true, migrateNativeFallbacks: false });
+    assert.equal(Object.hasOwn(calls[0], 'mainModel'), false);
+  } finally { await browser.close(); await srv.close(); }
+});
+
 test('обновление: очистка включает перенос и смена модели сбрасывает план', async (t) => {
   if (!chromium) return t.skip('Playwright не найден');
   const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
@@ -795,7 +821,7 @@ test('обновление: очистка включает перенос и с
     await page.check('#update-ack'); await page.click('#btn-update-apply');
     await page.waitForSelector('#update-backup');
     const calls = updateCalls(srv).map((r) => r.body);
-    assert.deepEqual(calls[0], { dryRun: true, migrateNativeFallbacks: true, cleanupLegacyFallbacks: true, mainModel: 'gpt-6.1-sol' });
+    assert.deepEqual(calls[0], { dryRun: true, scope: 'all', seedNativeFallbacks: false, migrateNativeFallbacks: true, cleanupLegacyFallbacks: true, mainModel: 'gpt-6.1-sol' });
     assert.equal(calls[1].mainModel, 'other-model');
     assert.deepEqual(calls[2], { ...calls[1], dryRun: false, planHash: 'plan-hash-1-migrate', acknowledgeManagedFiles: true });
   } finally { await browser.close(); await srv.close(); }
@@ -824,8 +850,8 @@ test('обновление: перенос резервных моделей —
     await page.check('#update-ack'); await page.click('#btn-update-apply');
     await page.waitForSelector('#update-backup');
     const calls = updateCalls(srv).map((r) => r.body);
-    assert.deepEqual(calls[0], { dryRun: true, migrateNativeFallbacks: false });
-    assert.deepEqual(calls[1], { dryRun: true, migrateNativeFallbacks: true });
-    assert.deepEqual(calls[2], { dryRun: false, planHash: 'plan-hash-1-migrate', acknowledgeManagedFiles: true, migrateNativeFallbacks: true });
+    assert.deepEqual(calls[0], { dryRun: true, scope: 'all', seedNativeFallbacks: false, migrateNativeFallbacks: false });
+    assert.deepEqual(calls[1], { dryRun: true, scope: 'all', seedNativeFallbacks: false, migrateNativeFallbacks: true });
+    assert.deepEqual(calls[2], { dryRun: false, scope: 'all', seedNativeFallbacks: false, planHash: 'plan-hash-1-migrate', acknowledgeManagedFiles: true, migrateNativeFallbacks: true });
   } finally { await browser.close(); await srv.close(); }
 });

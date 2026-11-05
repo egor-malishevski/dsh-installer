@@ -757,6 +757,10 @@
     RELAY_WORKAROUND_PRESERVED: 'Ваша настройка relay сохранена.',
     EXTRA_FILE_PRESERVED: 'Дополнительный файл не из установщика сохранён.',
     YAML_ALIAS_PRESERVED: 'Прежние алиасы моделей специалистов в каталоге сохранены на случай ссылок и комментариев; роли используют собственные резервные модели.',
+    NATIVE_FALLBACK_SEEDING: 'Добавлены резервы специалистам без настроенных fallback.',
+    SEED_ROLE_APPLIED: 'Для роли добавлены резервы.',
+    SEED_ROLE_SKIPPED: 'Существующие настройки резервов роли сохранены.',
+    SEED_NO_RESERVES: 'Подходящие резервы для роли не найдены.',
   };
   const UPDATE_NOOP_OPS = ['skip', 'keep', 'unchanged', 'preserve'];
 
@@ -804,6 +808,16 @@
     CLEANUP_ALIAS_REFERENCED: 'На fallback-алиас остаются ссылки в настройках. Удалите их вручную и повторите предпросмотр.',
     RELAY_HASH_MISMATCH: 'Relay отличается от ожидаемой версии. Автоматически заменить его нельзя.',
     RELAY_UPSTREAM_REQUIRED: 'Для замены старого relay нужен явно заданный upstream в профиле; текущий адрес не удалось безопасно подтвердить.',
+    BAD_UPDATE_OPTIONS: 'Выбрано несовместимое сочетание настроек обновления. Проверьте выбор и повторите предпросмотр.',
+    SLIM_NOT_INSTALLED: 'Для этого режима нужен установленный Oh My DSH Slim.',
+    VERSION_CONFLICT: 'Версия или зависимости установки не совпадают с ожидаемыми. Автоматически обновить нельзя.',
+    SEED_INPUT_INVALID: 'Не удалось безопасно подготовить добавление резервов.',
+    SEED_SLIM_AMBIGUOUS: 'Не удалось однозначно определить настройки Slim для добавления резервов.',
+    SEED_CATALOG_MISSING: 'Для добавления резервов нужен каталог моделей в профиле.',
+    SEED_CATALOG_AMBIGUOUS: 'Не удалось однозначно определить каталог моделей.',
+    SEED_CATALOG_INVALID: 'Каталог моделей имеет неподдерживаемую структуру.',
+    SEED_TARGET_MODEL_MISSING: 'Нужная модель для резерва отсутствует в каталоге.',
+    SEED_CONFIG_CONFLICT: 'Настройки ролей не позволяют безопасно добавить резервы.',
   };
   const UPDATE_CONFLICT_TEXT = {
     HARNESS_RUNNING: 'Harness запущен — его нужно закрыть.',
@@ -863,6 +877,7 @@
         label: updateOpLabel(x.op),
         path: sanitizeText(x.path, secrets, 300),
         reason: UPDATE_REASONS[String(x.reason || '').toUpperCase()] || sanitizeText(translateServerText(x.reason || ''), secrets, 300),
+        details: (Array.isArray(x.details) ? x.details : []).slice(0, 30).map((d) => UPDATE_REASONS[String(d || '').toUpperCase()] || sanitizeText(translateServerText(d || ''), secrets, 200)).filter(Boolean),
         noop: UPDATE_NOOP_OPS.includes(op),
         needsAck: x.needsAck === true && !UPDATE_NOOP_OPS.includes(op),
       };
@@ -896,14 +911,16 @@
     if (!preview || !preview.canApply || !preview.planHash) throw new Error('PREVIEW_REQUIRED');
     if (acknowledged !== true) throw new Error('CONFIRMATION_REQUIRED');
     // Выбор переноса берётся из самого предпросмотра: хэш плана привязан именно к нему.
-    const options = buildUpdatePreviewBody(preview.migrateNativeFallbacks, preview.cleanupLegacyFallbacks, preview.mainModel);
+    const options = buildUpdatePreviewBody(preview.migrateNativeFallbacks, preview.cleanupLegacyFallbacks, preview.mainModel, preview.scope, preview.seedNativeFallbacks);
     return { ...options, dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true };
   }
 
   /** Очистка включает перенос; модель сохраняется в плане только при очистке. */
-  function buildUpdatePreviewBody(migrateNativeFallbacks, cleanupLegacyFallbacks, mainModel) {
+  function buildUpdatePreviewBody(migrateNativeFallbacks, cleanupLegacyFallbacks, mainModel, scope, seedNativeFallbacks) {
+    if (scope !== 'all' && scope !== 'slim') throw new Error('BAD_UPDATE_OPTIONS');
+    if (scope === 'slim' && (cleanupLegacyFallbacks === true || mainModel !== undefined)) throw new Error('BAD_UPDATE_OPTIONS');
     const cleanup = cleanupLegacyFallbacks === true;
-    const body = { dryRun: true, migrateNativeFallbacks: cleanup || migrateNativeFallbacks === true };
+    const body = { dryRun: true, scope, seedNativeFallbacks: seedNativeFallbacks === true, migrateNativeFallbacks: cleanup || migrateNativeFallbacks === true };
     if (cleanup) {
       if (typeof mainModel !== 'string' || !mainModel || mainModel !== mainModel.trim() || mainModel.includes('fallback-')) throw new Error('CLEANUP_MAIN_MODEL_INVALID');
       body.cleanupLegacyFallbacks = true;

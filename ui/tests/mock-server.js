@@ -117,7 +117,7 @@ function createServer(opts) {
           // Макет /api/update: ничего не пишет. Ответы повторяют согласованную форму.
           const b = JSON.parse(body || '{}');
           // Хэш привязан к выбору переноса: план без переноса нельзя применить с переносом и наоборот.
-          const hash = 'plan-hash-' + (o.updateRevision || 1) + (b.migrateNativeFallbacks === true ? '-migrate' : '');
+          const hash = 'plan-hash-' + (o.updateRevision || 1) + (b.migrateNativeFallbacks === true ? '-migrate' : '') + (b.seedNativeFallbacks === true ? '-seed' : '') + (b.scope === 'slim' ? '-slim' : '');
           if (b.dryRun === true) {
             if (o.updatePreviewFail) return send(409, { ok: false, code: 'HARNESS_RUNNING', error: 'Quit DeepSeek Harness before installation.' });
             if (o.updateDelay) return setTimeout(() => send(200, { ok: true, dryRun: true, actions: [], conflicts: [], backupPath: null, requiresRestart: true, planHash: hash }), o.updateDelay);

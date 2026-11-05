@@ -59,6 +59,8 @@
     update: { status: 'idle', preview: null, ack: false, errors: [], codes: [], result: null },
     // Явное согласие на перенос резервных моделей; по умолчанию выключено.
     updateMigrate: false,
+    updateScope: '',
+    updateSeed: false,
     updateCleanup: false,
     updateMainModel: 'gpt-6.1-sol',
   };
@@ -1173,6 +1175,8 @@
   function resetUpdate() {
     ++updateSeq;
     state.updateMigrate = false;
+    state.updateScope = '';
+    state.updateSeed = false;
     state.updateCleanup = false;
     state.updateMainModel = 'gpt-6.1-sol';
     state.update = { status: 'idle', preview: null, ack: false, errors: [], codes: [], result: null };
@@ -1197,9 +1201,10 @@
   async function runUpdatePreview(keepErrors) {
     if (state.busy) return;
     let options;
-    try { options = Core.buildUpdatePreviewBody(state.updateMigrate, state.updateCleanup, state.updateMainModel); }
-    catch (_) {
-      state.update = { status: 'idle', preview: null, ack: false, errors: [{ field: '', message: 'Укажите идентификатор обычной модели без fallback- и пробелов по краям.' }], codes: ['CLEANUP_MAIN_MODEL_INVALID'], result: null };
+    try { options = Core.buildUpdatePreviewBody(state.updateMigrate, state.updateCleanup, state.updateCleanup ? state.updateMainModel : undefined, state.updateScope, state.updateSeed); }
+    catch (err) {
+      const scopeError = err.message === 'BAD_UPDATE_OPTIONS';
+      state.update = { status: 'idle', preview: null, ack: false, errors: [{ field: '', message: scopeError ? 'Выберите состав обновления.' : 'Укажите идентификатор обычной модели без fallback- и пробелов по краям.' }], codes: [scopeError ? 'BAD_UPDATE_OPTIONS' : 'CLEANUP_MAIN_MODEL_INVALID'], result: null };
       render('update-errors');
       return;
     }
@@ -1288,6 +1293,31 @@
 
     root.append(updateErrorsBlock());
 
+    const scope = el('select', { id: 'update-scope', disabled: !!state.busy, 'aria-describedby': 'update-scope-d',
+      onchange: () => {
+        state.updateScope = scope.value;
+        if (scope.value === 'slim') { state.updateCleanup = false; state.updateMainModel = 'gpt-6.1-sol'; }
+        invalidateUpdate('update-scope');
+      },
+    }, el('option', { value: '', text: 'Выберите состав обновления' }),
+    el('option', { value: 'slim', text: 'Только Oh My DSH Slim (рекомендуется)' }),
+    el('option', { value: 'all', text: 'Все компоненты' }));
+    scope.value = state.updateScope;
+    root.append(el('section', { class: 'card' }, el('label', { for: 'update-scope', text: 'Что обновить' }), scope,
+      el('p', { class: 'hint', id: 'update-scope-d', text: state.updateScope === 'slim'
+        ? 'Обновляется только установленный Slim. Манифест, файл блокировки, relay, наборы компонентов и основная модель сохраняются.'
+        : state.updateScope === 'all'
+          ? 'Обновляются все компоненты; исправляются записи зависимостей и наборов компонентов. Файл блокировки может помешать обновлению.'
+          : 'Выберите состав перед предпросмотром.' })));
+
+    const seedCb = el('input', { type: 'checkbox', id: 'update-seed', disabled: !!state.busy, 'aria-describedby': 'update-seed-d',
+      onchange: () => { state.updateSeed = seedCb.checked; invalidateUpdate('update-seed'); } });
+    seedCb.checked = state.updateSeed;
+    root.append(el('label', { class: 'choice', for: 'update-seed' }, seedCb,
+      el('span', { class: 'choice__body' },
+        el('span', { class: 'choice__title', text: 'Добавить резервы специалистам без настроенных fallback' }),
+        el('span', { class: 'choice__desc', id: 'update-seed-d', text: 'По желанию. Основные модели специалистов и main не меняются; явно заданный пустой список резервов, существующие роли и пользовательские инструменты сохраняются.' }))));
+
     const migrateCb = el('input', {
       type: 'checkbox', id: 'update-migrate', disabled: !!state.busy || state.updateCleanup, 'aria-describedby': 'update-migrate-d',
       onchange: () => setUpdateMigrate(migrateCb.checked),
@@ -1299,14 +1329,14 @@
         el('span', { class: 'choice__desc', id: 'update-migrate-d', text: state.updateCleanup ? 'Включено вместе с очисткой: резервы пяти специалистов будут перенесены в Slim.' : 'По желанию. Касается пяти специалистов: oracle, designer, fixer, explorer, librarian. Основная модель main остаётся на прежнем маршруте. Если не отмечать, резервные модели не меняются. После смены выбора предпросмотр нужно построить заново.' }))));
 
     const cleanupCb = el('input', {
-      type: 'checkbox', id: 'update-cleanup', disabled: !!state.busy, 'aria-describedby': 'update-cleanup-d',
+      type: 'checkbox', id: 'update-cleanup', disabled: !!state.busy || state.updateScope !== 'all', 'aria-describedby': 'update-cleanup-d',
       onchange: () => { state.updateCleanup = cleanupCb.checked; invalidateUpdate('update-cleanup'); },
     });
     cleanupCb.checked = state.updateCleanup;
     root.append(el('label', { class: 'choice', for: 'update-cleanup' }, cleanupCb,
       el('span', { class: 'choice__body' },
         el('span', { class: 'choice__title', text: 'Удалить старые fallback-модели' }),
-        el('span', { class: 'choice__desc', id: 'update-cleanup-d', text: 'Необязательно. Удаляет виртуальные fallback-модели, переносит резервы специалистов в Oh My DSH Slim и заменяет relay fallback обычным прокси. Основная модель останется без автоматического fallback. Перенос резервов включается автоматически. Если настройки нельзя безопасно изменить, предпросмотр покажет конфликт.' }))));
+        el('span', { class: 'choice__desc', id: 'update-cleanup-d', text: 'Только при обновлении всех компонентов. Удаляет виртуальные fallback-модели, переносит резервы специалистов в Oh My DSH Slim и заменяет relay fallback обычным прокси. Основная модель останется без автоматического fallback. Перенос резервов включается автоматически. Если настройки нельзя безопасно изменить, предпросмотр покажет конфликт.' }))));
     if (state.updateCleanup) {
       const model = el('input', { type: 'text', id: 'update-main-model', value: state.updateMainModel, list: 'update-models', disabled: !!state.busy, 'aria-describedby': 'update-main-model-d',
         onchange: () => { state.updateMainModel = model.value; invalidateUpdate('update-main-model'); },
@@ -1333,7 +1363,7 @@
     const previewing = state.busy === 'update-preview';
     root.append(el('div', { class: 'card' },
       el('button', {
-        type: 'button', class: 'btn' + (u.preview ? '' : ' btn--primary'), id: 'btn-update-preview', disabled: !!state.busy, onclick: () => runUpdatePreview(false),
+        type: 'button', class: 'btn' + (u.preview ? '' : ' btn--primary'), id: 'btn-update-preview', disabled: !!state.busy || !state.updateScope, onclick: () => runUpdatePreview(false),
       }, previewing ? [el('span', { class: 'spinner', 'aria-hidden': 'true' }), 'Строим предпросмотр…'] : (u.preview ? 'Обновить предпросмотр' : 'Показать, что изменится')),
       el('p', { class: 'hint', text: 'Запрос только проверяет и составляет план. Файлы не меняются.' })));
 
@@ -1387,7 +1417,8 @@
           el('span', { class: 'plan-op' }, a.label, a.needsAck ? el('small', { class: 'plan-ack', text: 'требует подтверждения' }) : null),
           el('span', { class: 'plan-body' },
             el('code', { class: 'plan-path', text: a.path || '—' }),
-            a.reason ? el('span', { class: 'small muted', text: a.reason }) : null)))));
+            a.reason ? el('span', { class: 'small muted', text: a.reason }) : null,
+            a.details.map((detail) => el('span', { class: 'small muted', text: detail }))))));
     }
     card.append(el('p', { class: 'hint', text: p.requiresRestart
       ? 'После применения Harness нужно запустить заново.'

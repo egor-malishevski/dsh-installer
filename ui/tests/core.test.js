@@ -231,16 +231,19 @@ test('обновление: предпросмотр разбирается, п�
 });
 
 test('обновление: тело apply строится только из пригодного плана и подтверждения', () => {
-  const p = C.normalizeUpdatePreview({ ok: true, actions: [], conflicts: [], planHash: 'hash-12345678' }, []);
-  assert.deepEqual(C.buildUpdateApplyBody(p, true), { dryRun: false, planHash: 'hash-12345678', acknowledgeManagedFiles: true, migrateNativeFallbacks: false });
+  const p = { ...C.normalizeUpdatePreview({ ok: true, actions: [], conflicts: [], planHash: 'hash-12345678' }, []), scope: 'all' };
+  assert.deepEqual(C.buildUpdateApplyBody(p, true), { dryRun: false, scope: 'all', seedNativeFallbacks: false, planHash: 'hash-12345678', acknowledgeManagedFiles: true, migrateNativeFallbacks: false });
   assert.equal(C.buildUpdateApplyBody({ ...p, migrateNativeFallbacks: true }, true).migrateNativeFallbacks, true);
-  assert.deepEqual(C.buildUpdatePreviewBody(), { dryRun: true, migrateNativeFallbacks: false });
-  assert.deepEqual(C.buildUpdatePreviewBody(true), { dryRun: true, migrateNativeFallbacks: true });
-  assert.deepEqual(C.buildUpdatePreviewBody('yes'), { dryRun: true, migrateNativeFallbacks: false }, 'только строгий true');
-  const options = C.buildUpdatePreviewBody(false, true, 'gpt-6.1-sol');
-  assert.deepEqual(options, { dryRun: true, migrateNativeFallbacks: true, cleanupLegacyFallbacks: true, mainModel: 'gpt-6.1-sol' });
+  assert.throws(() => C.buildUpdatePreviewBody(), /BAD_UPDATE_OPTIONS/);
+  assert.deepEqual(C.buildUpdatePreviewBody('yes', false, undefined, 'slim', 'yes'), { dryRun: true, scope: 'slim', seedNativeFallbacks: false, migrateNativeFallbacks: false });
+  const slim = C.buildUpdatePreviewBody(false, false, undefined, 'slim', true);
+  assert.deepEqual(C.buildUpdateApplyBody({ ...p, ...slim }, true), { ...slim, dryRun: false, planHash: p.planHash, acknowledgeManagedFiles: true });
+  assert.throws(() => C.buildUpdatePreviewBody(false, true, 'gpt-6.1-sol', 'slim'), /BAD_UPDATE_OPTIONS/);
+  assert.throws(() => C.buildUpdatePreviewBody(false, false, '', 'slim'), /BAD_UPDATE_OPTIONS/);
+  const options = C.buildUpdatePreviewBody(false, true, 'gpt-6.1-sol', 'all', true);
+  assert.deepEqual(options, { dryRun: true, scope: 'all', seedNativeFallbacks: true, migrateNativeFallbacks: true, cleanupLegacyFallbacks: true, mainModel: 'gpt-6.1-sol' });
   assert.deepEqual(C.buildUpdateApplyBody({ ...p, ...options }, true), { ...options, dryRun: false, planHash: p.planHash, acknowledgeManagedFiles: true });
-  assert.throws(() => C.buildUpdatePreviewBody(false, true, 'fallback-main'), /CLEANUP_MAIN_MODEL_INVALID/);
+  assert.throws(() => C.buildUpdatePreviewBody(false, true, 'fallback-main', 'all'), /CLEANUP_MAIN_MODEL_INVALID/);
   assert.match(C.normalizeUpdatePreview({ ok: true, actions: [], planHash: 'hash-12345678', warnings: ['NATIVE_FALLBACK_MIGRATION', 'ALIAS_STILL_REFERENCED'] }, []).warnings.join(' '), /перенесены в Oh My DSH Slim[\s\S]*алиас/);
   assert.throws(() => C.buildUpdateApplyBody(p, false), /CONFIRMATION_REQUIRED/);
   assert.throws(() => C.buildUpdateApplyBody(null, true), /PREVIEW_REQUIRED/);
