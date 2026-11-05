@@ -154,7 +154,8 @@ test('original relay cleanup requires explicit upstream and acknowledgement', as
   await assert.rejects(lstat(join(home, '.dsh/backups')), { code: 'ENOENT' });
   const normal = await updateProfile({ home, cleanupLegacyFallbacks: false });
   assert.ok(!normal.conflicts.includes('RELAY_UPSTREAM_REQUIRED'));
-  assert.ok(normal.actions.some(a => a.path.endsWith('/zstd-render/index.js') && a.needsAck));
+  assert.ok(normal.actions.some(a => a.reason === 'ORIGINAL_RELAY_PRESERVED'));
+  assert.ok(!normal.actions.some(a => a.path.endsWith('/zstd-render/index.js') && a.op === 'replace'));
   const profile = rows();
   profile.push(relayRow(home, 'https://example.test'));
   await writeFile(patchPath(home), JSON.stringify(profile));

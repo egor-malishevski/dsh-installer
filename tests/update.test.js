@@ -132,14 +132,31 @@ test('differing pin conflicts and existing lockfile refuses', async t => {
   const pinned = await fixture(t, { pkg: { ...oldPkg, dependencies: { '@deepseek-ai/dsh-base': '0.2.0' } } });
   const r = await updateProfile({ home: pinned, ...base });
   assert.ok(r.conflicts.includes('PIN_CONFLICT'));
-  const locked = await fixture(t);
-  await writeFile(join(locked, '.dsh/profiles/desktop/pnpm-lock.yaml'), 'x');
-  assert.ok((await updateProfile({ home: locked, ...base })).conflicts.includes('UNEXPECTED_LOCK'));
-  const before = await snapshot(locked);
-  const p = await updateProfile({ home: locked, ...base });
-  const applied = await updateProfile({ home: locked, dryRun: false, planHash: p.planHash, ...base });
+  const ready = structuredClone(oldPkg);
+  ready.dependencies['dsh-integrations'] = 'link:../../bundles/dsh-integrations';
+  ready.dependencies['oh-my-dsh-slim'] = 'link:../../plugins/oh-my-dsh-slim';
+  ready.dsh.profile.bundles.push('dsh-integrations', 'oh-my-dsh-slim');
+  const locked = await fixture(t, { pkg: ready });
+  await writeFile(join(locked, '.dsh/profiles/desktop/pnpm-lock.yaml'), "lockfileVersion: '9.0'\nimporters:\n\n  .:\n    dependencies:\n      dsh-integrations:\n        specifier: link:../../bundles/dsh-integrations\n        version: link:../../bundles/dsh-integrations\n");
+  const preview = await updateProfile({ home: locked, ...base });
+  assert.deepEqual(preview.conflicts, []);
+  assert.ok(preview.actions.some(a => a.reason === 'PNPM_LINK_LOCK_UPDATED'));
+  const done = await updateProfile({ home: locked, dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true, ...base });
+  assert.equal(done.ok, true);
+  const lock = await readFile(join(locked, '.dsh/profiles/desktop/pnpm-lock.yaml'), 'utf8');
+  assert.match(lock, /dsh-web-search-exa-parallel:\n {8}specifier: link:\.\.\/\.\.\/plugins\/dsh-web-search-exa-parallel/);
+  assert.match(lock, /dsh-integrations:/);
+  const malformed = await fixture(t);
+  await writeFile(join(malformed, '.dsh/profiles/desktop/pnpm-lock.yaml'), 'x');
+  assert.ok((await updateProfile({ home: malformed, ...base })).conflicts.includes('UNEXPECTED_LOCK'));
+  const npm = await fixture(t);
+  await writeFile(join(npm, '.dsh/profiles/desktop/package-lock.json'), '{}');
+  assert.ok((await updateProfile({ home: npm, ...base })).conflicts.includes('UNEXPECTED_LOCK'));
+  const before = await snapshot(malformed);
+  const p = await updateProfile({ home: malformed, ...base });
+  const applied = await updateProfile({ home: malformed, dryRun: false, planHash: p.planHash, ...base });
   assert.equal(applied.ok, false);
-  assert.deepEqual(await snapshot(locked), before);
+  assert.deepEqual(await snapshot(malformed), before);
 });
 
 test('symlinked parents and files are refused', async t => {
