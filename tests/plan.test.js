@@ -40,7 +40,7 @@ test('fresh home plans an owner-only credential store; existing store is skipped
     const store = fresh.files.filter(file => file.path === '.dsh/.credentials.yaml');
     assert.equal(store.length, 1);
     assert.equal(store[0].secret, true);
-    assert.deepEqual(JSON.parse(store[0].content), { version: 1, refs: { CLIPROXY_API_KEY: 'synthetic-plan-key' } });
+    assert.equal(store[0].content, 'version: 1\nrefs:\n  CLIPROXY_API_KEY: "synthetic-plan-key"\n');
     assert.ok(!fresh.requirements.some(r => /credentials\.yaml/.test(r)));
     assert.ok(!JSON.stringify(fresh.requirements).includes('synthetic-plan-key'));
     assert.ok(!fresh.files.some(file => file.path.includes('cliproxy-key')));

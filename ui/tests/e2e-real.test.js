@@ -146,7 +146,7 @@ test('E2E: без MCP — настоящий server.js записывает фа
   // что реально записано
   const files = await walk(path.join(ctx.home, '.dsh'));
   t.diagnostic('записано файлов: ' + files.length + ' (по плану ' + planned + ', включая 2 symlink)');
-  assert.deepEqual(JSON.parse(await fs.readFile(path.join(ctx.home, '.dsh/.credentials.yaml'), 'utf8')), { version: 1, refs: { CLIPROXY_API_KEY: API_KEY } });
+  assert.equal(await fs.readFile(path.join(ctx.home, '.dsh/.credentials.yaml'), 'utf8'), `version: 1\nrefs:\n  CLIPROXY_API_KEY: ${JSON.stringify(API_KEY)}\n`);
   assert.ok(files.some((f) => f.startsWith('profiles/desktop/cordis.patch.yml')));
   assert.equal(await fs.readlink(path.join(ctx.home, '.dsh/profiles/desktop/node_modules/dsh-integrations')), '../../../bundles/dsh-integrations');
   assert.ok(!files.some((f) => f.includes('gitlab-token')), 'без выбора MCP токенов MCP нет');
@@ -160,7 +160,7 @@ test('E2E: без MCP — настоящий server.js записывает фа
   await page2.click('#btn-install');
   await page2.waitForSelector('#install-errors');
   assert.match(await page2.textContent('#install-errors'), /не перезаписывает|уже существует/);
-  assert.deepEqual(JSON.parse(await fs.readFile(path.join(ctx.home, '.dsh/.credentials.yaml'), 'utf8')), { version: 1, refs: { CLIPROXY_API_KEY: API_KEY } });
+  assert.equal(await fs.readFile(path.join(ctx.home, '.dsh/.credentials.yaml'), 'utf8'), `version: 1\nrefs:\n  CLIPROXY_API_KEY: ${JSON.stringify(API_KEY)}\n`);
   assert.equal(await page2.locator('#h-backup').count(), 0, 'экран «готово» не показан');
 
   assert.deepEqual(external, [], 'внешних запросов нет');

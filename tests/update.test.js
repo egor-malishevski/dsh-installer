@@ -118,6 +118,25 @@ test('invalid or foreign local links conflict without applying or backing up', a
   }
 });
 
+test('legacy JSON credential store becomes YAML and other stores stay untouched', async t => {
+  const home = await fixture(t);
+  const store = join(home, '.dsh/.credentials.yaml');
+  await writeFile(store, '{\n  "version": 1,\n  "refs": {\n    "CLIPROXY_API_KEY": "synthetic-key"\n  }\n}\n');
+  const preview = await updateProfile({ home, ...base });
+  assert.ok(preview.actions.some(action => action.reason === 'CREDENTIAL_STORE_YAML'));
+  const done = await updateProfile({ home, dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true, ...base });
+  assert.equal(done.ok, true);
+  assert.equal(await readFile(store, 'utf8'), 'version: 1\nrefs:\n  CLIPROXY_API_KEY: "synthetic-key"\n');
+  const custom = await fixture(t);
+  const customStore = join(custom, '.dsh/.credentials.yaml');
+  const original = 'version: 1\nrefs:\n  OTHER: "keep-me"\n';
+  await writeFile(customStore, original);
+  const again = await updateProfile({ home: custom, ...base });
+  assert.ok(!again.actions.some(action => action.reason === 'CREDENTIAL_STORE_YAML'));
+  await updateProfile({ home: custom, dryRun: false, planHash: again.planHash, acknowledgeManagedFiles: true, ...base });
+  assert.equal(await readFile(customStore, 'utf8'), original);
+});
+
 test('second apply is a no-op without a new backup', async t => {
   const home = await fixture(t);
   await apply(home);

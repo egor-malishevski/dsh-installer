@@ -9,7 +9,7 @@ import { roles } from '../lib/config.js';
 import { models } from '../lib/profile.js';
 async function assertStore(home, key) {
   const file = join(home, '.dsh/.credentials.yaml');
-  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { version: 1, refs: { CLIPROXY_API_KEY: key } });
+  assert.equal(await readFile(file, 'utf8'), `version: 1\nrefs:\n  CLIPROXY_API_KEY: ${JSON.stringify(key)}\n`);
   assert.equal((await stat(file)).mode & 0o777, 0o600);
   await assert.rejects(stat(join(home, '.dsh/secrets/installer/cliproxy-key')), { code: 'ENOENT' });
 }
