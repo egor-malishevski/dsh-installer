@@ -8,12 +8,13 @@ import { mcps, roles, validateConfig } from './lib/config.js';
 import { inspectEnvironment as defaultInspect } from './lib/environment.js';
 import { buildInstallPlan } from './lib/plan.js';
 import { installPlan } from './lib/install.js';
+import { updateProfile } from './lib/update.js';
 import { probeRelayPort } from './lib/relay-port.js';
 import { discoverModels, recommendRoles, invalidRoles, profileModels } from './lib/discovery.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const maxBody = 256 * 1024;
-export function createServer({ token = randomBytes(32).toString('hex'), uiRoot = resolve(root, 'ui'), home = homedir(), environment, inspectEnvironmentFn = defaultInspect, discoveryModelsFn = discoverModels, afterWrite } = {}) {
+export function createServer({ token = randomBytes(32).toString('hex'), uiRoot = resolve(root, 'ui'), home = homedir(), environment, inspectEnvironmentFn = defaultInspect, discoveryModelsFn = discoverModels, afterWrite, assertStoppedFn } = {}) {
   let origin;
   let relayPortPromise;
   const relayPort = () => relayPortPromise ??= probeRelayPort();
@@ -33,10 +34,22 @@ export function createServer({ token = randomBytes(32).toString('hex'), uiRoot =
         try { return send(res, 200, { ok: true, defaults: { apiUrl: '', roles, mcps }, environment: publicEnvironment(environment ?? await inspect()) }); }
         catch { return send(res, 500, { ok: false, error: 'Environment inspection failed.', code: 'PREFLIGHT_FAILED' }); }
       }
-      if (req.method !== 'POST' || !['/api/validate', '/api/install'].includes(pathname)) return send(res, 404, { ok: false, error: 'Not found' });
+      if (req.method !== 'POST' || !['/api/validate', '/api/install', '/api/update'].includes(pathname)) return send(res, 404, { ok: false, error: 'Not found' });
       if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, { ok: false, error: 'JSON required' });
       let size = 0; const chunks = [];
       for await (const chunk of req) { size += chunk.length; if (size > maxBody) return send(res, 413, { ok: false, error: 'Request too large' }); chunks.push(chunk); }
+      if (pathname === '/api/update') {
+        try {
+          const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.dryRun !== 'boolean') return send(res, 400, { ok: false, code: 'INVALID_REQUEST', error: 'Invalid update request.' });
+          const result = await updateProfile({ home, dryRun: input.dryRun, planHash: input.planHash, acknowledgeManagedFiles: input.acknowledgeManagedFiles === true, migrateNativeFallbacks: input.migrateNativeFallbacks === undefined ? false : input.migrateNativeFallbacks, cleanupLegacyFallbacks: input.cleanupLegacyFallbacks === undefined ? false : input.cleanupLegacyFallbacks, mainModel: input.mainModel, ...(assertStoppedFn ? { assertStoppedFn } : {}), checkEnvironment: () => (environment ? Promise.resolve(environment) : inspect()), afterWrite });
+          return send(res, result.ok ? 200 : 409, result);
+        } catch (error) {
+          const codes = new Set(['UNSAFE_PATH', 'UNSAFE_PAYLOAD', 'LOCKED', 'APP_RUNNING', 'STALE_PLAN', 'PLAN_REQUIRED', 'ROLLBACK_FAILED', 'UPDATE_FAILED', 'INVALID_REQUEST']);
+          if (codes.has(error?.code)) return send(res, 409, { ok: false, code: error.code, error: 'Update could not be completed.', ...(error.backupPath ? { backupPath: error.backupPath } : {}) });
+          return send(res, 400, { ok: false, code: error instanceof SyntaxError ? 'INVALID_JSON' : 'UPDATE_FAILED', error: error instanceof SyntaxError ? 'Invalid JSON' : 'Update could not be completed.' });
+        }
+      }
       try {
         const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         const config = input.config ?? input;

@@ -668,3 +668,164 @@ test('список изменился при установке: нет успе
     assert.equal(await page.isDisabled('#btn-install'), true);
   } finally { await browser.close(); await srv.close(); }
 });
+
+async function openUpdate(page, srv) {
+  await page.goto('http://127.0.0.1:' + srv.port + '/#token=' + srv.options.token);
+  await page.waitForSelector('#mode-update');
+  await page.click('#mode-update');
+  await page.waitForSelector('#btn-update-preview');
+}
+const updateCalls = (srv) => srv.log.requests.filter((r) => r.path === '/api/update');
+
+test('обновление: предпросмотр, подтверждение, применение, резервная копия', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  const srv = await listen({ updateWarnings: ['WARNING: custom note'] });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+    await openUpdate(page, srv);
+    assert.equal(await page.locator('#apiKey').count(), 0, 'ключ не нужен');
+    assert.equal(await page.isDisabled('#btn-update-apply'), true, 'без предпросмотра нельзя');
+    assert.match(await page.textContent('#update-deps-note'), /не запускает npm/);
+    await page.click('#btn-update-preview');
+    await page.waitForSelector('#update-plan');
+    assert.deepEqual(updateCalls(srv).map((r) => r.body), [{ dryRun: true, migrateNativeFallbacks: false }]);
+    const plan = await page.textContent('#update-plan');
+    assert.match(plan, /profiles\/desktop\/config\.json/);
+    assert.match(plan, /Заменить/);
+    assert.match(plan, /managed-file-changed/);
+    assert.match(await page.textContent('#panel'), /custom note/);
+    assert.equal(await page.isDisabled('#btn-update-apply'), true, 'без подтверждения нельзя');
+    await page.screenshot({ path: process.env.DSH_UI_SHOT_DIR ? process.env.DSH_UI_SHOT_DIR + '/update-preview.png' : undefined, fullPage: true }).catch(() => {});
+    await page.check('#update-ack');
+    assert.equal(await page.isDisabled('#btn-update-apply'), false);
+    await page.click('#btn-update-apply');
+    await page.waitForSelector('#update-backup');
+    assert.equal(await page.textContent('#update-backup'), '/tmp/dsh-backup-update');
+    assert.match(await page.textContent('#update-restart'), /Запустите Harness заново/);
+    assert.deepEqual(updateCalls(srv)[1].body, { dryRun: false, planHash: 'plan-hash-1', acknowledgeManagedFiles: true, migrateNativeFallbacks: false });
+    assert.equal(srv.log.requests.filter((r) => r.path === '/api/install').length, 0);
+    // Режим установки сохранён
+    await page.click('#mode-install');
+    await page.waitForSelector('#tutorial-skip');
+  } finally { await browser.close(); await srv.close(); }
+});
+
+test('обновление: конфликты, отсутствие planHash и ошибка предпросмотра блокируют применение', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  for (const [options, re] of [
+    [{ updateConflicts: ['USER_MODIFIED'] }, /USER_MODIFIED/],
+    [{ updateNoHash: true }, /без отпечатка|План без отпечатка/],
+    [{ updatePreviewFail: true }, /HARNESS_RUNNING/],
+  ]) {
+    const srv = await listen(options);
+    try {
+      const page = await browser.newPage();
+      await openUpdate(page, srv);
+      await page.click('#btn-update-preview');
+      await page.waitForSelector('#update-conflicts, #update-errors, .callout--bad');
+      assert.match(await page.textContent('#panel'), re);
+      assert.equal(await page.isDisabled('#btn-update-apply'), true);
+      if (await page.locator('#update-ack').count()) assert.equal(await page.isDisabled('#update-ack'), true);
+      assert.ok(updateCalls(srv).every((r) => r.body.dryRun === true), 'apply не отправлялся');
+    } finally { await srv.close(); }
+  }
+  await browser.close();
+});
+
+test('обновление: устаревший план — отказ, сброс подтверждения и новый предпросмотр', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  const srv = await listen({ updateStaleOnApply: true });
+  try {
+    const page = await browser.newPage();
+    await openUpdate(page, srv);
+    await page.click('#btn-update-preview'); await page.waitForSelector('#update-plan');
+    await page.check('#update-ack'); await page.click('#btn-update-apply');
+    await page.waitForFunction(() => document.querySelector('#update-errors') && document.querySelector('#update-plan'));
+    assert.match(await page.textContent('#update-errors'), /План устарел/);
+    assert.equal(await page.isChecked('#update-ack'), false, 'подтверждение сброшено');
+    assert.equal(await page.isDisabled('#btn-update-apply'), true);
+    const calls = updateCalls(srv).map((r) => r.body);
+    assert.equal(calls.length, 3);
+    assert.deepEqual(calls[2], { dryRun: true, migrateNativeFallbacks: false });
+    await page.check('#update-ack'); await page.click('#btn-update-apply');
+    await page.waitForSelector('#update-backup');
+    assert.equal(updateCalls(srv)[3].body.planHash, 'plan-hash-2');
+  } finally { await browser.close(); await srv.close(); }
+});
+
+test('обновление: ошибка применения не раскрывает секреты и код чистится; повторный клик не дублирует запрос', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  const srv = await listen({ updateApplyFail: true });
+  try {
+    const page = await browser.newPage();
+    await openUpdate(page, srv);
+    await page.click('#btn-update-preview'); await page.waitForSelector('#update-plan');
+    await page.check('#update-ack');
+    await page.evaluate(() => { const b = document.getElementById('btn-update-apply'); b.click(); b.click(); });
+    await page.waitForSelector('#update-errors');
+    assert.equal(updateCalls(srv).filter((r) => r.body.dryRun === false).length, 1, 'ровно один apply');
+    const text = await page.textContent('#panel');
+    assert.ok(!text.includes('sk-secret-leak-9999'), 'сырой текст ошибки сервера не показывается');
+    assert.ok(!/<script>/.test(await page.locator('#panel').innerHTML()));
+    assert.equal(await page.locator('#update-plan').count(), 0, 'старый план убран');
+    assert.equal(await page.isDisabled('#btn-update-apply'), true);
+  } finally { await browser.close(); await srv.close(); }
+});
+
+test('обновление: очистка включает перенос и смена модели сбрасывает план', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  const srv = await listen();
+  try {
+    const page = await browser.newPage();
+    await openUpdate(page, srv);
+    await page.check('#update-cleanup');
+    assert.equal(await page.isChecked('#update-migrate'), true);
+    assert.equal(await page.isDisabled('#update-migrate'), true);
+    await page.click('#btn-update-preview'); await page.waitForSelector('#update-plan');
+    await page.check('#update-ack');
+    await page.fill('#update-main-model', 'other-model');
+    assert.equal(await page.locator('#update-plan').count(), 0);
+    assert.equal(await page.locator('#update-ack').count(), 0);
+    await page.click('#btn-update-preview'); await page.waitForSelector('#update-plan');
+    await page.check('#update-ack'); await page.click('#btn-update-apply');
+    await page.waitForSelector('#update-backup');
+    const calls = updateCalls(srv).map((r) => r.body);
+    assert.deepEqual(calls[0], { dryRun: true, migrateNativeFallbacks: true, cleanupLegacyFallbacks: true, mainModel: 'gpt-6.1-sol' });
+    assert.equal(calls[1].mainModel, 'other-model');
+    assert.deepEqual(calls[2], { ...calls[1], dryRun: false, planHash: 'plan-hash-1-migrate', acknowledgeManagedFiles: true });
+  } finally { await browser.close(); await srv.close(); }
+});
+
+test('обновление: перенос резервных моделей — явный выбор, смена сбрасывает предпросмотр и подтверждение', async (t) => {
+  if (!chromium) return t.skip('Playwright не найден');
+  const browser = await launch(); if (!browser) return t.skip('Chromium не установлен');
+  const srv = await listen();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+    await openUpdate(page, srv);
+    assert.equal(await page.isChecked('#update-migrate'), false, 'по умолчанию выключено');
+    assert.match(await page.textContent('#update-migrate-d'), /oracle, designer, fixer, explorer, librarian/);
+    assert.match(await page.textContent('#update-migrate-d'), /main остаётся/);
+    await page.click('#btn-update-preview'); await page.waitForSelector('#update-plan');
+    await page.check('#update-ack');
+    // Смена выбора: старый план и подтверждение пропадают, применить нельзя.
+    await page.check('#update-migrate');
+    assert.equal(await page.locator('#update-plan').count(), 0);
+    assert.equal(await page.locator('#update-ack').count(), 0);
+    assert.equal(await page.isDisabled('#btn-update-apply'), true);
+    await page.click('#btn-update-preview'); await page.waitForSelector('#update-plan');
+    assert.match(await page.textContent('#update-plan').then(() => page.textContent('#panel')), /перенесены в Oh My DSH Slim/);
+    assert.equal(await page.isChecked('#update-ack'), false, 'подтверждение нужно дать заново');
+    await page.check('#update-ack'); await page.click('#btn-update-apply');
+    await page.waitForSelector('#update-backup');
+    const calls = updateCalls(srv).map((r) => r.body);
+    assert.deepEqual(calls[0], { dryRun: true, migrateNativeFallbacks: false });
+    assert.deepEqual(calls[1], { dryRun: true, migrateNativeFallbacks: true });
+    assert.deepEqual(calls[2], { dryRun: false, planHash: 'plan-hash-1-migrate', acknowledgeManagedFiles: true, migrateNativeFallbacks: true });
+  } finally { await browser.close(); await srv.close(); }
+});

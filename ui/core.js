@@ -466,6 +466,24 @@
     return out;
   }
 
+  /**
+   * Запасные маршруты роли: [{provider, model, effort?}]. Не массив → undefined (поле не отправляется).
+   * Пустые «половинки» не чиним и не выбрасываем молча: их отклонит сервер.
+   */
+  function normalizeFallbacks(list) {
+    if (!Array.isArray(list)) return undefined;
+    return list.slice(0, 20).map((x) => {
+      const e = x && typeof x === 'object' ? x : {};
+      const out = { provider: String(e.provider || '').trim(), model: String(e.model || '').trim() };
+      if (typeof e.effort === 'string' && e.effort.trim()) out.effort = e.effort.trim();
+      return out;
+    });
+  }
+
+  function fallbackLabel(f) {
+    return f.provider + '/' + f.model + (f.effort ? ' · ' + f.effort : '');
+  }
+
   function buildConfig(input) {
     const selected = new Set(input.selected || []);
     const mcps = (input.mcps || [])
@@ -480,6 +498,9 @@
         model: locks.model ? '' : String(r.model || '').trim(),
         effort: locks.effort ? '' : String(r.effort || '').trim(),
       };
+      // Запасные маршруты, присланные сервером, не теряем: массив (в том числе пустой) уходит как есть.
+      const fb = normalizeFallbacks(r.fallbacks);
+      if (fb && !locks.model) roles[key].fallbacks = fb;
     }
     return { apiUrl: String(input.apiUrl || '').trim(), apiKey: String(input.apiKey || '').trim(), mcps, roles };
   }
@@ -552,6 +573,7 @@
         main: meta[key] && typeof meta[key].main === 'boolean' ? meta[key].main : isMainRole(key),
         model: locks.model ? 'наследует основную модель' : String(r.model || '').trim() || 'не указана',
         effort: locks.effort ? 'настраивается в сессии' : String(r.effort || '').trim() || 'не задан',
+        fallbacks: (normalizeFallbacks(r.fallbacks) || []).map(fallbackLabel),
       };
     });
     return { api, mcps, roles };
@@ -723,7 +745,208 @@
     return many;
   }
 
+  /* ---------- Обновление существующей установки ---------- */
+
+  const UPDATE_OPS = {
+    create: 'Создать', add: 'Создать', write: 'Записать', replace: 'Заменить', update: 'Обновить',
+    overwrite: 'Заменить', symlink: 'Ссылка', remove: 'Удалить', delete: 'Удалить', skip: 'Пропустить', keep: 'Оставить',
+    unchanged: 'Без изменений', preserve: 'Оставить', merge: 'Объединить',
+  };
+  // Только пометки «ничего не пишется»: по ним считаем, сколько файлов реально изменится.
+  const UPDATE_REASONS = {
+    RELAY_WORKAROUND_PRESERVED: 'Ваша настройка relay сохранена.',
+    EXTRA_FILE_PRESERVED: 'Дополнительный файл не из установщика сохранён.',
+    YAML_ALIAS_PRESERVED: 'Прежние алиасы моделей специалистов в каталоге сохранены на случай ссылок и комментариев; роли используют собственные резервные модели.',
+  };
+  const UPDATE_NOOP_OPS = ['skip', 'keep', 'unchanged', 'preserve'];
+
+  const UPDATE_CODES = {
+    PREVIEW_REQUIRED: 'Сначала постройте предпросмотр: применять можно только его результат.',
+    PLAN_REQUIRED: 'Сначала постройте предпросмотр: применять можно только его результат.',
+    STALE_PLAN: 'План устарел: файлы изменились после предпросмотра. Постройте предпросмотр заново.',
+    PLAN_STALE: 'План устарел: файлы изменились после предпросмотра. Постройте предпросмотр заново.',
+    PLAN_MISMATCH: 'План не совпадает с текущим состоянием файлов. Постройте предпросмотр заново.',
+    PLAN_HASH_MISMATCH: 'План не совпадает с текущим состоянием файлов. Постройте предпросмотр заново.',
+    CONFIRMATION_REQUIRED: 'Нужно подтвердить замену файлов, которыми управляет установщик.',
+    ACKNOWLEDGEMENT_REQUIRED: 'Нужно подтвердить замену файлов, которыми управляет установщик.',
+    CONFLICTS: 'В плане есть конфликты. Применить его нельзя, пока они не устранены.',
+    PLAN_CONFLICTS: 'В плане есть конфликты. Применить его нельзя, пока они не устранены.',
+    HARNESS_RUNNING: 'Harness запущен. Закройте его и постройте предпросмотр заново.',
+    APP_RUNNING: 'Harness запущен. Закройте его и постройте предпросмотр заново.',
+    ACK_REQUIRED: 'Нужно подтвердить замену файлов, которыми управляет установщик.',
+    PATCH_UNPARSEABLE: 'Не удалось безопасно разобрать профиль. Проверьте синтаксис JSON/YAML.',
+    PATCH_YAML_UNSUPPORTED: 'Профиль содержит YAML-конструкции, которые пока нельзя безопасно изменить. Файлы не изменены.',
+    PREFLIGHT_FAILED: 'Условия для обновления не выполнены. Закройте Harness и проверьте окружение.',
+    NO_PROFILE: 'Существующая установка не найдена. Для нового профиля используйте «Новая установка».',
+    PROFILE_NOT_FOUND: 'Существующая установка не найдена. Для нового профиля используйте «Новая установка».',
+    NOT_INSTALLED: 'Существующая установка не найдена. Для нового профиля используйте «Новая установка».',
+    LOCKED: 'Обновление уже выполняется в другом окне. Дождитесь окончания и повторите.',
+    UNSAFE_PATH: 'Установщик отказался писать по небезопасному пути (например, через символическую ссылку).',
+    ROLLBACK_FAILED: 'Обновление не удалось, и откат не завершился полностью. Проверьте папку ~/.dsh вручную.',
+    UPDATE_FAILED: 'Обновление не удалось. Постройте предпросмотр заново.',
+    PROFILE_MISSING: 'Существующая установка не найдена. Для нового профиля используйте «Новая установка».',
+    TREE_VERSION_MISMATCH: 'Версия установленного плагина неизвестна или не совпадает с ожидаемой, поэтому перезаписывать его файлы нельзя. Файлы не тронуты.',
+    PIN_CONFLICT: 'Версия или привязка в профиле не совпадает с ожидаемой. Автоматически обновить нельзя, файлы не тронуты.',
+    LINK_CONFLICT: 'Символическая ссылка в профиле ведёт не туда, куда ожидалось. Файлы не тронуты.',
+    UNEXPECTED_LOCK: 'Найден неожиданный файл блокировки. Дождитесь окончания другой операции или проверьте ~/.dsh вручную.',
+    APP_INCOMPATIBLE: 'Установленная версия Harness не подходит для этого обновления. Файлы не тронуты.',
+    ENV_CHECK_FAILED: 'Не удалось проверить окружение. Закройте Harness и повторите предпросмотр.',
+    PACKAGE_UNPARSEABLE: 'Не удалось прочитать файл package.json в профиле. Файлы не тронуты.',
+    PACKAGE_SHAPE: 'Структура package.json в профиле отличается от ожидаемой. Файлы не тронуты.',
+    PATCH_SHAPE: 'Структура файла настроек отличается от ожидаемой, изменить его автоматически нельзя. Файлы не тронуты.',
+    PATCH_ENTRY_MISSING: 'В файле настроек нет записи, которую нужно обновить. Файлы не тронуты.',
+    DUPLICATE_ENTRY: 'В файле настроек запись повторяется. Автоматически обновить нельзя, файлы не тронуты.',
+    UNSAFE_PAYLOAD: 'Установщик отказался записывать небезопасное содержимое. Файлы не тронуты.',
+    READ_FAILED: 'Не удалось прочитать файлы профиля. Проверьте доступ к ~/.dsh и повторите.',
+    CLEANUP_INPUT_INVALID: 'Не удалось безопасно подготовить очистку. Проверьте настройки.',
+    CLEANUP_CATALOG_INVALID: 'Каталог моделей имеет неподдерживаемую структуру или повторяющиеся идентификаторы.',
+    CLEANUP_MAIN_MODEL_INVALID: 'Выберите существующий идентификатор обычной модели из каталога, не fallback-алиас.',
+    CLEANUP_ALIAS_REFERENCED: 'На fallback-алиас остаются ссылки в настройках. Удалите их вручную и повторите предпросмотр.',
+    RELAY_HASH_MISMATCH: 'Relay отличается от ожидаемой версии. Автоматически заменить его нельзя.',
+  };
+  const UPDATE_CONFLICT_TEXT = {
+    HARNESS_RUNNING: 'Harness запущен — его нужно закрыть.',
+    APP_RUNNING: 'Harness запущен — его нужно закрыть.',
+    PATCH_UNPARSEABLE: 'Не удалось безопасно разобрать профиль. Проверьте синтаксис JSON/YAML.',
+    PATCH_YAML_UNSUPPORTED: 'Профиль содержит YAML-конструкции, которые пока нельзя безопасно изменить. Файлы не изменены.',
+    USER_MODIFIED: 'Файл изменён вручную и не совпадает с тем, что записал установщик.',
+    MODIFIED_MANAGED_FILE: 'Файл изменён вручную и не совпадает с тем, что записал установщик.',
+    UNMANAGED_FILE: 'По этому пути лежит файл, который установщик не создавал.',
+    UNSAFE_PATH: 'Небезопасный путь (например, символическая ссылка).',
+    MANIFEST_MISSING: 'Не найден манифест установки.',
+    NOT_INSTALLED: 'Существующая установка не найдена.',
+    PROFILE_MISSING: 'Существующая установка не найдена.',
+    TREE_VERSION_MISMATCH: 'Версия установленного плагина неизвестна или не совпадает с ожидаемой, поэтому перезаписывать его файлы нельзя.',
+    PIN_CONFLICT: 'Версия или привязка в профиле не совпадает с ожидаемой.',
+    LINK_CONFLICT: 'Символическая ссылка ведёт не туда, куда ожидалось.',
+    UNEXPECTED_LOCK: 'Найден неожиданный файл блокировки.',
+    APP_INCOMPATIBLE: 'Установленная версия Harness не подходит для обновления.',
+    ENV_CHECK_FAILED: 'Не удалось проверить окружение.',
+    PACKAGE_UNPARSEABLE: 'Не удалось прочитать package.json.',
+    PACKAGE_SHAPE: 'Структура package.json отличается от ожидаемой.',
+    PATCH_SHAPE: 'Структура файла настроек отличается от ожидаемой.',
+    PATCH_ENTRY_MISSING: 'В файле настроек нет нужной записи.',
+    DUPLICATE_ENTRY: 'Запись в файле настроек повторяется.',
+    UNSAFE_PAYLOAD: 'Небезопасное содержимое для записи.',
+    READ_FAILED: 'Не удалось прочитать файл.',
+  };
+
+  const UPDATE_WARNING_TEXT = {
+    NATIVE_FALLBACK_MIGRATION: 'Резервные модели ролей будут перенесены в Oh My DSH Slim (пять специалистов).',
+    ALIAS_STILL_REFERENCED: 'На прежний алиас модели всё ещё есть ссылки, поэтому он сохранён. Проверьте настройки после обновления.',
+  };
+
+  const PLAN_HASH_RE = /^[A-Za-z0-9._:\-]{8,200}$/;
+
+  function updateOpLabel(op) {
+    const key = String(op || '').toLowerCase();
+    return UPDATE_OPS[key] || sanitizeText(op, [], 40) || '—';
+  }
+
+  function safeCode(code, secrets) {
+    return sanitizeText(code, secrets, 80).replace(/[^A-Za-z0-9_.:\- ]/g, '');
+  }
+
+  /**
+   * Ответ /api/update {dryRun:true} → безопасная модель предпросмотра.
+   * canApply — только если ok:true, есть planHash, нет конфликтов и разбор не нашёл странностей.
+   */
+  function normalizeUpdatePreview(data, secrets) {
+    const d = data && typeof data === 'object' ? data : {};
+    const rawActions = Array.isArray(d.actions) ? d.actions : null;
+    const actions = (rawActions || []).slice(0, 500).map((a) => {
+      const x = a && typeof a === 'object' ? a : {};
+      const op = String(x.op || '').toLowerCase();
+      return {
+        op,
+        label: updateOpLabel(x.op),
+        path: sanitizeText(x.path, secrets, 300),
+        reason: UPDATE_REASONS[String(x.reason || '').toUpperCase()] || sanitizeText(translateServerText(x.reason || ''), secrets, 300),
+        noop: UPDATE_NOOP_OPS.includes(op),
+        needsAck: x.needsAck === true && !UPDATE_NOOP_OPS.includes(op),
+      };
+    });
+    const conflicts = (Array.isArray(d.conflicts) ? d.conflicts : []).slice(0, 50).map((c) => {
+      const code = safeCode(c && typeof c === 'object' ? (c.code || c.id || '') : c, secrets);
+      const detail = c && typeof c === 'object' ? sanitizeText(translateServerText(c.message || c.path || ''), secrets, 300) : '';
+      return { code, text: UPDATE_CONFLICT_TEXT[code.toUpperCase()] || UPDATE_CODES[code.toUpperCase()] || '', detail };
+    }).filter((c) => (c.code || c.detail) && c.code.toUpperCase() !== 'ACK_REQUIRED');
+    const warnings = Array.from(new Set((Array.isArray(d.warnings) ? d.warnings : []).slice(0, 20)
+      .map((w) => {
+        const raw = typeof w === 'string' ? w : w && (w.code || w.message);
+        return UPDATE_WARNING_TEXT[String(raw || '').trim().toUpperCase()] || cleanRequirement(typeof w === 'string' ? w : w && w.message, secrets);
+      }).filter(Boolean)));
+    const planHash = typeof d.planHash === 'string' && PLAN_HASH_RE.test(d.planHash) ? d.planHash : '';
+    const shapeOk = d.ok === true && d.dryRun !== false && !!rawActions;
+    return {
+      shapeOk,
+      actions,
+      changeCount: actions.filter((a) => !a.noop).length,
+      conflicts,
+      warnings,
+      planHash,
+      requiresRestart: d.requiresRestart !== false,
+      canApply: shapeOk && !!planHash && conflicts.length === 0 && d.canApply !== false,
+    };
+  }
+
+  /** Тело apply-запроса. Бросает, если предпросмотра нет, он с конфликтами или нет подтверждения. */
+  function buildUpdateApplyBody(preview, acknowledged) {
+    if (!preview || !preview.canApply || !preview.planHash) throw new Error('PREVIEW_REQUIRED');
+    if (acknowledged !== true) throw new Error('CONFIRMATION_REQUIRED');
+    // Выбор переноса берётся из самого предпросмотра: хэш плана привязан именно к нему.
+    const options = buildUpdatePreviewBody(preview.migrateNativeFallbacks, preview.cleanupLegacyFallbacks, preview.mainModel);
+    return { ...options, dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true };
+  }
+
+  /** Очистка включает перенос; модель сохраняется в плане только при очистке. */
+  function buildUpdatePreviewBody(migrateNativeFallbacks, cleanupLegacyFallbacks, mainModel) {
+    const cleanup = cleanupLegacyFallbacks === true;
+    const body = { dryRun: true, migrateNativeFallbacks: cleanup || migrateNativeFallbacks === true };
+    if (cleanup) {
+      if (typeof mainModel !== 'string' || !mainModel || mainModel !== mainModel.trim() || mainModel.includes('fallback-')) throw new Error('CLEANUP_MAIN_MODEL_INVALID');
+      body.cleanupLegacyFallbacks = true;
+      body.mainModel = mainModel;
+    }
+    return body;
+  }
+
+  /** Ошибка /api/update: код + понятный текст. Код всегда проходит чистку. */
+  function normalizeUpdateProblems(res, secrets) {
+    const p = normalizeProblems(res, secrets);
+    const raw = res && res.data && typeof res.data === 'object' ? res.data : {};
+    const rawCode = typeof raw.code === 'string' ? raw.code : (raw.error && typeof raw.error === 'object' && typeof raw.error.code === 'string' ? raw.error.code : '');
+    const code = safeCode(rawCode, secrets);
+    const known = UPDATE_CODES[code.toUpperCase()];
+    // Текст ошибки от сервера не показываем как есть: только известное объяснение по коду или общее по HTTP-статусу.
+    const status = res && res.networkError ? 0 : res && res.status;
+    const messages = [{ field: '', message: known || (res && res.aborted
+      ? 'Сервер не ответил вовремя. Проверьте подключение и повторите.'
+      : httpStatusMessage(status)) }];
+    const conflicts = (Array.isArray(raw.conflicts) ? raw.conflicts : []).slice(0, 20)
+      .map((c) => safeCode(c && typeof c === 'object' ? c.code : c, secrets)).filter(Boolean);
+    return { code, messages, conflicts, stale: /^(STALE_PLAN|PLAN_STALE|PLAN_REQUIRED|PLAN_MISMATCH|PLAN_HASH_MISMATCH|PREVIEW_REQUIRED)$/i.test(code) };
+  }
+
+  function extractUpdateResult(data, secrets) {
+    const d = data && typeof data === 'object' ? data : {};
+    return {
+      backupPath: typeof d.backupPath === 'string' && d.backupPath ? sanitizeText(d.backupPath, secrets, 400) : '',
+      requiresRestart: d.requiresRestart !== false,
+      applied: (Array.isArray(d.actions) ? d.actions : []).filter((a) => a && !UPDATE_NOOP_OPS.includes(String(a.op || '').toLowerCase())).length,
+    };
+  }
+
   return {
+    normalizeFallbacks,
+    fallbackLabel,
+    buildUpdatePreviewBody,
+    UPDATE_CODES,
+    normalizeUpdatePreview,
+    buildUpdateApplyBody,
+    normalizeUpdateProblems,
+    extractUpdateResult,
+    updateOpLabel,
     MASK,
     parseFragmentToken,
     maskSecret,

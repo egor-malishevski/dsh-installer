@@ -16,7 +16,7 @@ test('preflight reports unsupported system without modifying native data', async
   assert.ok(result.blockers.some(b => b.includes('macOS')));
   assert.ok(result.blockers.some(b => b.includes('0.2.1-rc.5')));
   assert.equal(await readFile(join(home, '.dsh', 'keep'), 'utf8'), 'untouched');
-  assert.equal((await assertStopped(join(home, '.dsh'), { home, ownPid: 123, listProcesses: async () => ['124 node dsh-desktop-host/lib/cli.js web'] })).ok, false);
+  assert.equal((await assertStopped(join(home, '.dsh'), { home, ownPid: 123, listProcesses: async () => ['124 node main-host.js'] })).ok, false);
   await mkdir(join(home, '.dsh/profiles/desktop'), { recursive: true });
   await assert.rejects(installPlan({ targetHome: home, files: [{ path: '.dsh/profiles/desktop/test', content: '', secret: false }] }, { checkEnvironment: async () => true, checkStopped: async () => true }), { code: 'EXISTING_PROFILE' });
 });

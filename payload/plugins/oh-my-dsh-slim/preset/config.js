@@ -44,6 +44,46 @@ export function isEffortToken(value) {
   return typeof value === 'string' && EFFORT_TOKEN_PATTERN.test(value);
 }
 
+/** Specialist roles that may declare `fallbacks` (native request-error failover). */
+export const FALLBACK_ROLE_IDS = Object.freeze(['oracle', 'designer', 'fixer', 'explorer', 'librarian']);
+/** Upper bound of fallback entries per role. */
+export const MAX_FALLBACKS = 3;
+
+/**
+ * Validate `roles.<id>.fallbacks`: an ordered array (<= MAX_FALLBACKS) of
+ * { provider, model, effort? }. Only the five specialists accept it; council
+ * seats, the synthesizer and observer reject any value.
+ * @param roleId - the role being validated.
+ * @param role - the merged role document.
+ */
+function validateFallbacks(roleId, role) {
+  const list = role.fallbacks;
+  if (list === undefined) return;
+  const label = 'oh-my-dsh-slim: ' + roleId + '.fallbacks';
+  if (!FALLBACK_ROLE_IDS.includes(roleId)) throw new Error(label + ' is not supported for this role');
+  if (!Array.isArray(list)) throw new Error(label + ' must be an array');
+  if (list.length > MAX_FALLBACKS) throw new Error(label + ' accepts at most ' + MAX_FALLBACKS + ' entries');
+  const seen = new Set();
+  if (typeof role.provider === 'string' && role.provider !== '' && typeof role.model === 'string' && role.model !== '') {
+    seen.add(JSON.stringify([role.provider, role.model]));
+  }
+  list.forEach((entry, index) => {
+    const at = label + '[' + index + ']';
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(at + ' must be an object');
+    for (const key of Object.keys(entry)) {
+      if (!['provider', 'model', 'effort'].includes(key)) throw new Error(at + ' has unknown field "' + key + '"');
+    }
+    if (typeof entry.provider !== 'string' || entry.provider === '') throw new Error(at + '.provider must be a non-empty string');
+    if (typeof entry.model !== 'string' || entry.model === '') throw new Error(at + '.model must be a non-empty string');
+    if (entry.effort !== undefined && !isEffortToken(entry.effort)) {
+      throw new Error(at + '.effort must be a short token of letters, digits, "-" or "_"');
+    }
+    const pair = JSON.stringify([entry.provider, entry.model]);
+    if (seen.has(pair)) throw new Error(at + ' duplicates the role model or an earlier fallback (' + entry.provider + '/' + entry.model + ')');
+    seen.add(pair);
+  });
+}
+
 // Per-role runtime knobs that are not part of the shipped preset document.
 // `temperature` is a role trait (the personas assume it). `maxTokens` is
 // deliberately absent: an output cap is a property of the model, not of the
@@ -242,6 +282,9 @@ function validateOrchestrator(orchestrator) {
   if (orchestrator?.effort !== undefined && !isEffortToken(orchestrator.effort)) {
     throw new Error('oh-my-dsh-slim: orchestrator.effort must be a short token of letters, digits, "-" or "_"');
   }
+  if (orchestrator?.fallbacks !== undefined) {
+    throw new Error('oh-my-dsh-slim: orchestrator.fallbacks is unsupported; only specialist roles accept fallbacks');
+  }
   if (orchestrator?.mcps !== undefined && (!Array.isArray(orchestrator.mcps) || orchestrator.mcps.length > 0)) {
     throw new Error('oh-my-dsh-slim: orchestrator.mcps is unsupported; configure MCPs through the host');
   }
@@ -259,6 +302,7 @@ function validateRole(roleId, role, servers) {
   if (role.maxTokens !== undefined && (!Number.isSafeInteger(role.maxTokens) || role.maxTokens < 1)) {
     throw new Error('oh-my-dsh-slim: ' + roleId + '.maxTokens must be a positive integer');
   }
+  validateFallbacks(roleId, role);
   if (role.tools !== undefined && (!Array.isArray(role.tools) || role.tools.some((name) => !TOOL_NAMES.has(name) && !isMcpToolName(name)))) {
     throw new Error('oh-my-dsh-slim: ' + roleId + '.tools contains an unknown global tool');
   }

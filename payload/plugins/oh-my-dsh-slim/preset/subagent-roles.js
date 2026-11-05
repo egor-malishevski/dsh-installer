@@ -25,7 +25,7 @@
 // child's next request. That is what makes a card edit apply to an existing
 // conversation instead of only to sessions created afterwards.
 
-import { loadConfig, bindProfileContext, ROLE_IDS } from './config.js';
+import { loadConfig, bindProfileContext, ROLE_IDS, FALLBACK_ROLE_IDS } from './config.js';
 import { isSubagent, roleIdForAgent } from './roles.js';
 import { hostImport } from './bridge.js';
 
@@ -363,18 +363,236 @@ async function requestConfig(ctx, payload, resolved) {
   return next;
 }
 
+// ---------------------------------------------------------------------------
+// Native model failover (roles.<specialist>.fallbacks)
+//
+// DSH 0.2.1 dispatches `agent/request-error` when a model request fails and a
+// listener returning { kind: 'retry' } makes the loop run prepareRequest and
+// agent/request AGAIN for the SAME turn/step — no pre-step, no tool rerun (tools
+// execute only after a successful assistant message; failed attempts never
+// reach model history). So failover is: remember which candidate the step runs
+// on, advance it in the error listener, and let the request listener above
+// apply it. The host agent object is the same in both waterfalls
+// (agentEvents(loopCtx, this) fuses the agent), so a WeakMap keyed by it is a
+// stable identity; entries carry {turn, step, index}.
+// ---------------------------------------------------------------------------
+
+/** Failure codes that justify moving to the next candidate. Everything else
+ * (AUTH, context, invalid request, unsupported, aborted ...) passes through. */
+export const FAILOVER_CODES = Object.freeze([
+  'QUOTA', 'ACCOUNT_QUOTA', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT',
+  'EMPTY_RESPONSE', 'UNKNOWN_MODEL', 'PI_AI_ERROR',
+]);
+const LONG_COOLDOWN_CODES = new Set(['QUOTA', 'ACCOUNT_QUOTA', 'UNKNOWN_MODEL']);
+const TRANSIENT_CODES = new Set(['SERVER', 'TIMEOUT', 'TRANSPORT', 'EMPTY_RESPONSE', 'PI_AI_ERROR']);
+export const COOLDOWN_MS = Object.freeze({
+  long: 10 * 60_000,
+  rateMin: 30_000,
+  rateMax: 600_000,
+  transient: 60_000,
+  transientWindow: 60_000,
+  transientCount: 2,
+});
+
+const modelKey = (route) => route.provider + '\u0000' + route.model;
+
+/**
+ * Per provider/model cooldowns. Success does not reset counters (no safe hook);
+ * transient failures simply expire from a 60 s window.
+ * @param now - injectable clock returning epoch milliseconds.
+ */
+export function createCooldowns(now = Date.now) {
+  const until = new Map();
+  const transient = new Map();
+  return {
+    isCooling(route) {
+      const end = until.get(modelKey(route));
+      if (end === undefined) return false;
+      if (end <= now()) { until.delete(modelKey(route)); return false; }
+      return true;
+    },
+    /** Record a failure; returns the cooldown duration applied (0 = none). */
+    record(route, failure) {
+      const key = modelKey(route);
+      const code = failure?.code;
+      const at = now();
+      let duration = 0;
+      if (LONG_COOLDOWN_CODES.has(code)) duration = COOLDOWN_MS.long;
+      else if (code === 'RATE_LIMIT') {
+        const hint = Number.isFinite(failure?.providerRetryAfterMs) ? failure.providerRetryAfterMs : 0;
+        duration = Math.min(COOLDOWN_MS.rateMax, Math.max(COOLDOWN_MS.rateMin, hint));
+      } else if (TRANSIENT_CODES.has(code)) {
+        const recent = (transient.get(key) ?? []).filter((time) => at - time < COOLDOWN_MS.transientWindow);
+        recent.push(at);
+        transient.set(key, recent);
+        if (recent.length >= COOLDOWN_MS.transientCount) duration = COOLDOWN_MS.transient;
+      }
+      if (duration > 0) until.set(key, Math.max(until.get(key) ?? 0, at + duration));
+      return duration;
+    },
+  };
+}
+
+/** The chain's candidate list: the effective primary route, then each fallback
+ * that does not repeat an earlier pair (a following role's primary is dynamic,
+ * so equality with it can only be checked here). */
+function buildChain(primary, fallbacks) {
+  const chain = [{ provider: primary.provider, model: primary.model, primary: true }];
+  const seen = new Set([modelKey(primary)]);
+  for (const entry of fallbacks) {
+    const key = modelKey(entry);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    chain.push({ provider: entry.provider, model: entry.model, ...(entry.effort === undefined ? {} : { effort: entry.effort }) });
+  }
+  return chain;
+}
+
+/** The specialist's declared fallbacks, or [] when it has none. */
+function fallbackFacts(ctx, agent) {
+  if (!isSubagent(agent)) return undefined;
+  const facts = roleFacts(ctx, agent);
+  const list = facts?.configured?.fallbacks;
+  if (!FALLBACK_ROLE_IDS.includes(facts?.roleId) || !Array.isArray(list) || list.length === 0) return undefined;
+  return { ...facts, fallbacks: list };
+}
+
+/** Config for a fallback candidate, or undefined when its metadata cannot be
+ * resolved (the candidate is then skipped, never silently replaced by the old
+ * route). The role's own effort belongs to the primary model and is dropped;
+ * the candidate's effort applies only when that model declares it. */
+async function fallbackConfig(ctx, facts, base, candidate) {
+  const info = await resolveRoute(ctx, candidate, facts, true);
+  if (info === undefined) return undefined;
+  const next = { ...base, provider: candidate.provider, model: candidate.model };
+  delete next.reasoningEffort;
+  if (text(candidate.effort)) {
+    const declared = declaredEfforts(info);
+    if ((declared ?? []).includes(candidate.effort)) next.reasoningEffort = candidate.effort;
+    else warnEffortFallback(ctx, facts, candidate, candidate.effort, declared ?? [], undefined);
+  }
+  const modelCap = typeof info.defaultMaxTokens === 'number' ? info.defaultMaxTokens : undefined;
+  const roleCap = typeof facts.configured.maxTokens === 'number' ? facts.configured.maxTokens : undefined;
+  if (roleCap !== undefined) next.maxTokens = modelCap === undefined ? roleCap : Math.min(roleCap, modelCap);
+  else delete next.maxTokens;
+  return next;
+}
+
+/**
+ * Request side: pick the candidate for this step and return its config.
+ * @returns the config to use, or undefined to keep `base`.
+ */
+async function failoverRequest(ctx, fo, payload, base) {
+  const agent = payload?.agent;
+  const turn = payload.turn;
+  const step = payload.step;
+  let state = fo.steps.get(agent);
+  if (state !== undefined && state.turn === turn && state.step === step) {
+    // The same step again. The snapshot taken at the step's first request is
+    // authoritative: configuration edits or metadata loss mid-step never swap
+    // the chain, and never reset to the primary (that would repeat it).
+    // `exhausted` only stops further switching: a host retry of the chain's
+    // last candidate keeps running on that candidate.
+    if (state.lost || state.index === 0) return undefined;
+    const candidate = state.chain[state.index];
+    const config = candidate === undefined ? undefined : await fallbackConfig(ctx, state.facts, base, candidate);
+    if (config !== undefined) return config;
+    state.exhausted = true;
+    state.lost = true;
+    ctx.logger?.warn?.('oh-my-dsh-slim: role "' + state.roleId + '" fallback metadata unavailable; no further failover this step.');
+    return undefined;
+  }
+  const facts = fallbackFacts(ctx, agent);
+  if (facts === undefined) return undefined;
+  const primary = { provider: base?.provider, model: base?.model };
+  if (!text(primary.provider) || !text(primary.model)) return undefined;
+  const chain = buildChain(primary, facts.fallbacks);
+  {
+    // A new step: first candidate that is not cooling and can be built; every
+    // candidate cooling means one bounded probe of the primary.
+    let chosen = 0;
+    let config;
+    for (let i = 0; i < chain.length; i += 1) {
+      if (fo.cooldowns.isCooling(chain[i])) continue;
+      if (i === 0) { chosen = 0; break; }
+      config = await fallbackConfig(ctx, facts, base, chain[i]);
+      if (config !== undefined) { chosen = i; break; }
+    }
+    state = {
+      turn, step, index: chosen, chain, roleId: facts.roleId, exhausted: false,
+      facts: { roleId: facts.roleId, configured: facts.configured },
+    };
+    fo.steps.set(agent, state);
+    if (chosen > 0) {
+      logSwitch(ctx, facts.roleId, chain[0], chain[chosen], 'cooldown');
+      return config;
+    }
+    return undefined;
+  }
+}
+
+/** Metadata-free record of a switch: roles and models only, never prompts or keys. */
+function logSwitch(ctx, roleId, from, to, reason) {
+  ctx.logger?.info?.(
+    'oh-my-dsh-slim: model role switch role=' + roleId + ' from=' + from.provider + '/' + from.model +
+    ' to=' + to.provider + '/' + to.model + ' reason=' + reason,
+  );
+}
+
+/**
+ * Error side: record the cooldown and, for an eligible failure, advance to the
+ * next not-cooling candidate whose metadata resolves. Returns the retry action,
+ * or undefined to let the next listener (the host's own retry) decide.
+ */
+async function failoverError(ctx, fo, payload) {
+  const agent = payload?.agent;
+  const state = agent === undefined ? undefined : fo.steps.get(agent);
+  if (state === undefined || state.turn !== payload.turn || state.step !== payload.step) return undefined;
+  if (payload.signal?.aborted) return undefined;
+  const code = payload.failure?.code;
+  if (!FAILOVER_CODES.includes(code)) return undefined;
+  if (state.exhausted) return undefined;
+  const facts = state.facts;
+  const current = state.chain[state.index];
+  if (current === undefined) { state.exhausted = true; return undefined; }
+  fo.cooldowns.record(current, payload.failure);
+  for (let j = state.index + 1; j < state.chain.length; j += 1) {
+    const candidate = state.chain[j];
+    if (fo.cooldowns.isCooling(candidate)) continue;
+    if (await resolveRoute(ctx, candidate, facts, true) === undefined) continue;
+    if (payload.signal?.aborted) return undefined;
+    state.index = j;
+    logSwitch(ctx, state.roleId, current, candidate, code);
+    return { kind: 'retry' };
+  }
+  state.exhausted = true;
+  return undefined;
+}
+
 /** Apply the row: one standing listener for every role in this preset. */
 export function apply(ctx, config = {}) {
   bindProfileContext(ctx, config.profileId);
   const scopeModule = ctx.loader !== undefined ? hostImport(ctx, '@deepseek-ai/dsh-scope') : undefined;
+  const fo = { steps: new WeakMap(), cooldowns: createCooldowns(config.now ?? Date.now) };
+  const inScope = async (payload) => {
+    if (!scopeModule) return true;
+    const scope = await scopeModule;
+    const owner = scope.scopeOf(ctx);
+    return !(owner === undefined || !payload?.agent?.ctx || !scope.scopeChainOf(scope.scopeOf(payload.agent.ctx)).includes(owner));
+  };
   ctx.effect(() => ctx.on('agent/request', async (payload, next) => {
-    if (scopeModule) {
-      const scope = await scopeModule;
-      const owner = scope.scopeOf(ctx);
-      if (owner === undefined || !payload?.agent?.ctx || !scope.scopeChainOf(scope.scopeOf(payload.agent.ctx)).includes(owner)) return next();
-    }
+    if (!await inScope(payload)) return next();
     const resolved = await next();
     const nextConfig = await requestConfig(ctx, payload, resolved);
-    return nextConfig === undefined ? resolved : nextConfig;
+    const base = nextConfig === undefined ? resolved : nextConfig;
+    const failover = await failoverRequest(ctx, fo, payload, base);
+    return failover === undefined ? base : failover;
   }, { global: true }), 'omds-subagent-roles: agent/request');
+  // Prepended so it runs before the host llm-retry listener, with the same
+  // scope filter as the request listener.
+  ctx.effect(() => ctx.on('agent/request-error', async (payload, next) => {
+    if (!await inScope(payload)) return next();
+    const action = await failoverError(ctx, fo, payload);
+    return action === undefined ? next() : action;
+  }, { global: true, prepend: true }), 'omds-subagent-roles: agent/request-error');
 }

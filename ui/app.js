@@ -53,6 +53,14 @@
     installErrors: [],
     result: null,
     animate: true,
+    // Режим: install — мастер новой установки, update — обновление существующей.
+    mode: 'install',
+    // status: idle | previewing | ready | applying | applied. preview — только свежий успешный dry-run.
+    update: { status: 'idle', preview: null, ack: false, errors: [], codes: [], result: null },
+    // Явное согласие на перенос резервных моделей; по умолчанию выключено.
+    updateMigrate: false,
+    updateCleanup: false,
+    updateMainModel: 'gpt-6.1-sol',
   };
 
   const $panel = document.getElementById('panel');
@@ -367,6 +375,9 @@
         if (!meta.locks.model && (!discoveryReady() || !state.models.includes(r.model))) {
           errs.push({ id: 'model-' + key, message: meta.label + ': выберите модель из проверенного списка CLIProxyAPI.' });
         }
+        if (!meta.locks.model && Array.isArray(r.fallbacks) && r.fallbacks.some((f) => f.provider + '/' + f.model === r.model)) {
+          errs.push({ id: 'model-' + key, message: meta.label + ': основная модель роли совпадает с запасной. Выберите другую модель или заново проверьте настройки на шаге CLIProxyAPI.' });
+        }
         if (!meta.locks.effort) {
           const fit = Core.reconcileEffort(meta.locks.model ? state.roles.main.model : r.model, r.effort, state.efforts);
           if (fit.reset) {
@@ -382,6 +393,13 @@
 
   function renderRail() {
     $steps.textContent = '';
+    if (state.phase === 'wizard' && state.mode === 'update') {
+      $compact.textContent = 'Обновление существующей установки';
+      $steps.append(el('li', { class: 'is-current' }, el('button', { type: 'button', class: 'step-btn', 'aria-current': 'step', 'aria-disabled': 'true' },
+        el('span', { class: 'step-btn__dot', 'aria-hidden': 'true', text: '↻' }),
+        el('span', { class: 'step-btn__label' }, 'Обновление', el('small', { text: 'Существующий профиль' })))));
+      return;
+    }
     const wizard = state.phase === 'wizard' || state.phase === 'done';
     $compact.textContent = state.phase === 'done'
       ? 'Установка завершена'
@@ -662,7 +680,11 @@
       state.efforts = Core.normalizeEfforts({}, { models: d.models.map((m) => ({ ...m, id: 'cliproxy/' + m.id.replace(/^cliproxy\//, '') })) });
       state.effortsFromServer = true;
       for (const key of state.roleOrder) {
-        if (d.roles[key]) state.roles[key] = { model: d.roles[key].model || '', effort: d.roles[key].effort || '' };
+        if (d.roles[key]) {
+          state.roles[key] = { model: d.roles[key].model || '', effort: d.roles[key].effort || '' };
+          const fb = Core.normalizeFallbacks(d.roles[key].fallbacks);
+          if (fb) state.roles[key].fallbacks = fb;
+        }
       }
       const network = true;
       const parts = ['Список моделей CLIProxyAPI получен: ' + models.length + '. Запрос к модели не выполнялся. Проверьте назначения на шаге «Роли и модели».'];
@@ -885,6 +907,7 @@
         return el('div', { class: 'field' }, el('label', { for: modelId, text: 'Модель' }), picker,
           el('p', { class: 'hint', text: 'Проверенный список CLIProxyAPI.' }));
       })();
+    const reserves = Array.isArray(role.fallbacks) ? role.fallbacks : [];
     return el('div', { class: 'role' },
       el('div', { class: 'role__head' },
         el('span', { class: 'role__name', text: meta.label }),
@@ -893,7 +916,10 @@
         modelField,
         el('div', { class: 'field' },
           el('label', { for: effId, text: 'Усилие (effort)' }),
-          select, effHint)));
+          select, effHint)),
+      reserves.length ? el('div', { class: 'reserves', id: 'fallbacks-' + key },
+        el('p', { class: 'small muted', text: 'Запасные модели по порядку. Их подобрал сервер по списку CLIProxyAPI. Если основная модель не справилась с попыткой или провайдер не ответил вовремя, попытка повторяется на запасной. Изменить список можно после установки в настройках Oh My DSH Slim.' }),
+        el('ol', { class: 'reserves__list small' }, reserves.map((f) => el('li', { text: Core.fallbackLabel(f) })))) : null);
   }
 
   function accessCard() {
@@ -942,7 +968,8 @@
       el('h2', { id: 'rv-roles' }, 'Роли и модели', editBtn(3)),
       el('dl', { class: 'rows' }, review.roles.map((r) => [
         el('dt', { text: r.label + (r.main ? ' (основной)' : '') }),
-        el('dd', null, r.model, el('span', { class: 'muted', text: ' · effort: ' + r.effort })),
+        el('dd', null, r.model, el('span', { class: 'muted', text: ' · effort: ' + r.effort }),
+          r.fallbacks.length ? el('span', { class: 'muted', text: ' · запасные: ' + r.fallbacks.join(', ') }) : null),
       ]))));
 
     root.append(envCard());
@@ -1120,20 +1147,291 @@
         el('button', { type: 'button', class: 'btn btn--primary', id: 'btn-retry', onclick: bootstrap, text: 'Повторить' })));
   }
 
+  /* ---------- Обновление существующей установки ---------- */
+
+  let updateSeq = 0;
+  const updateBusy = () => state.busy === 'update-preview' || state.busy === 'update-apply';
+
+  function setMode(mode) {
+    if (state.busy || state.mode === mode) return;
+    if (state.mode === 'update') resetUpdate(); // старый план при возврате не остаётся
+    state.mode = mode;
+    state.animate = true;
+    render('mode-' + mode);
+    announce(mode === 'update' ? 'Режим: обновление существующей установки' : 'Режим: новая установка');
+  }
+
+  function modeSwitch() {
+    const btn = (id, label) => el('button', {
+      type: 'button', id: 'mode-' + id, class: 'mode__btn', 'aria-pressed': state.mode === id ? 'true' : 'false',
+      disabled: !!state.busy, onclick: () => setMode(id), text: label,
+    });
+    return el('div', { class: 'mode', role: 'group', 'aria-label': 'Что сделать' },
+      btn('install', 'Новая установка'), btn('update', 'Обновить существующую установку'));
+  }
+
+  function resetUpdate() {
+    ++updateSeq;
+    state.updateMigrate = false;
+    state.updateCleanup = false;
+    state.updateMainModel = 'gpt-6.1-sol';
+    state.update = { status: 'idle', preview: null, ack: false, errors: [], codes: [], result: null };
+  }
+
+  /** Смена выбора переноса делает прежний предпросмотр и подтверждение недействительными. */
+  function setUpdateMigrate(value) {
+    if (state.busy) return;
+    state.updateMigrate = value === true;
+    invalidateUpdate('update-migrate');
+  }
+
+  function invalidateUpdate(focus) {
+    ++updateSeq;
+    state.update = { status: 'idle', preview: null, ack: false, errors: [], codes: [], result: null };
+    state.animate = false;
+    render(null, focus);
+    announce('Выбор изменён: предпросмотр нужно построить заново');
+  }
+
+  /** Dry-run: ничего не записывает. Любой старый план и подтверждение сбрасываются до ответа. */
+  async function runUpdatePreview(keepErrors) {
+    if (state.busy) return;
+    let options;
+    try { options = Core.buildUpdatePreviewBody(state.updateMigrate, state.updateCleanup, state.updateMainModel); }
+    catch (_) {
+      state.update = { status: 'idle', preview: null, ack: false, errors: [{ field: '', message: 'Укажите идентификатор обычной модели без fallback- и пробелов по краям.' }], codes: ['CLEANUP_MAIN_MODEL_INVALID'], result: null };
+      render('update-errors');
+      return;
+    }
+    const prev = state.update;
+    const seq = ++updateSeq;
+    state.update = { status: 'previewing', preview: null, ack: false, errors: keepErrors ? prev.errors : [], codes: keepErrors ? prev.codes : [], result: null };
+    state.busy = 'update-preview';
+    state.animate = false;
+    render('btn-update-preview');
+    announce('Строим предпросмотр обновления');
+    const res = await api('POST', '/api/update', options, 60000);
+    if (seq !== updateSeq) return;
+    state.busy = '';
+    const known = secrets();
+    const preview = res.data && res.data.ok === true ? Core.normalizeUpdatePreview(res.data, known) : null;
+    if (preview) Object.assign(preview, options);
+    if (preview && preview.shapeOk) {
+      state.update = { status: 'ready', preview, ack: false, errors: keepErrors ? prev.errors : [], codes: keepErrors ? prev.codes : [], result: null };
+      announce(preview.canApply ? 'Предпросмотр готов' : 'В плане есть конфликты');
+    } else {
+      const p = Core.normalizeUpdateProblems(res, known);
+      const messages = preview ? [{ field: '', message: 'Сервер прислал план в неожиданном виде. Применять его нельзя.' }] : p.messages;
+      state.update = { status: 'idle', preview: null, ack: false, errors: messages, codes: p.code ? [p.code] : p.conflicts, result: null };
+      announce('Предпросмотр не получен');
+    }
+    state.animate = false;
+    render(state.update.status === 'idle' ? 'update-errors' : 'btn-update-preview');
+  }
+
+  async function runUpdateApply() {
+    if (state.busy) return;
+    const u = state.update;
+    let body;
+    try { body = Core.buildUpdateApplyBody(u.preview, u.ack); } catch (_) { return; }
+    const seq = ++updateSeq;
+    state.busy = 'update-apply';
+    state.update = Object.assign({}, u, { status: 'applying', errors: [], codes: [] });
+    state.animate = false;
+    render('btn-update-apply');
+    announce('Обновление началось');
+    const res = await api('POST', '/api/update', body, 240000);
+    if (seq !== updateSeq) return;
+    state.busy = '';
+    const known = secrets();
+    if (res.data && res.data.ok === true && res.data.dryRun !== true) {
+      state.update = { status: 'applied', preview: null, ack: false, errors: [], codes: [], result: Core.extractUpdateResult(res.data, known) };
+      state.animate = true;
+      render('panelTitle');
+      announce('Обновление применено');
+      return;
+    }
+    // После любой ошибки старый план и подтверждение недействительны: нужен новый предпросмотр.
+    const p = Core.normalizeUpdateProblems(res, known);
+    state.update = { status: 'idle', preview: null, ack: false, errors: p.messages, codes: p.code ? [p.code] : p.conflicts, result: null };
+    state.animate = false;
+    render('update-errors');
+    announce('Обновление не выполнено');
+    if (p.stale) await runUpdatePreview(true);
+  }
+
+  function updateErrorsBlock() {
+    const u = state.update;
+    if (!u.errors.length) return document.createDocumentFragment();
+    return el('div', { id: 'update-errors', tabindex: '-1' }, callout('bad', 'Обновление не выполнено',
+      el('div', null,
+        el('ul', null, u.errors.map((m) => el('li', { text: (m.field ? m.field + ': ' : '') + m.message }))),
+        u.codes.length ? el('p', { class: 'small muted' }, 'Код: ', u.codes.map((c, i) => [i ? ', ' : '', el('code', { text: c })])) : null,
+        el('p', { class: 'small', text: 'Старый план сброшен. Чтобы продолжить, постройте предпросмотр заново.' }))));
+  }
+
+  function renderUpdate() {
+    const u = state.update;
+    const root = el('form', { novalidate: true, onsubmit: (e) => { e.preventDefault(); runUpdateApply(); } });
+    root.append(...heading('Обновление', 'Обновить существующую установку',
+      'Для профиля DSH, который уже установлен на этом Mac. Это отдельный путь: новый профиль здесь не создаётся, а API-ключ и MCP вводить не нужно.'));
+
+    if (u.status === 'applied') { root.append(...updateDone()); return root; }
+
+    root.append(el('section', { class: 'card', 'aria-labelledby': 'h-upd-how' },
+      el('h2', { id: 'h-upd-how', text: 'Как это работает' }),
+      el('ol', { class: 'next-list' },
+        el('li', { text: 'Предпросмотр показывает, какие файлы будут созданы или заменены. Он ничего не записывает.' }),
+        el('li', { text: 'Применить можно только тот план, который вы только что видели и в котором нет конфликтов. Если файлы изменились после предпросмотра, сервер откажет и план придётся построить заново.' }),
+        el('li', { text: 'Перед применением закройте Harness. После обновления откройте его заново: уже запущенная копия не подхватит изменения.' })),
+      el('p', { class: 'hint', id: 'update-deps-note', text: 'Зависимости: обновляются только записи в манифесте. Установщик не запускает npm, pnpm, uvx или другой менеджер пакетов — недостающее ставится вручную.' })));
+
+    root.append(updateErrorsBlock());
+
+    const migrateCb = el('input', {
+      type: 'checkbox', id: 'update-migrate', disabled: !!state.busy || state.updateCleanup, 'aria-describedby': 'update-migrate-d',
+      onchange: () => setUpdateMigrate(migrateCb.checked),
+    });
+    migrateCb.checked = state.updateMigrate === true || state.updateCleanup;
+    root.append(el('label', { class: 'choice', for: 'update-migrate' }, migrateCb,
+      el('span', { class: 'choice__body' },
+        el('span', { class: 'choice__title', text: 'Перенести резервные модели ролей в Oh My DSH Slim' }),
+        el('span', { class: 'choice__desc', id: 'update-migrate-d', text: state.updateCleanup ? 'Включено вместе с очисткой: резервы пяти специалистов будут перенесены в Slim.' : 'По желанию. Касается пяти специалистов: oracle, designer, fixer, explorer, librarian. Основная модель main остаётся на прежнем маршруте. Если не отмечать, резервные модели не меняются. После смены выбора предпросмотр нужно построить заново.' }))));
+
+    const cleanupCb = el('input', {
+      type: 'checkbox', id: 'update-cleanup', disabled: !!state.busy, 'aria-describedby': 'update-cleanup-d',
+      onchange: () => { state.updateCleanup = cleanupCb.checked; invalidateUpdate('update-cleanup'); },
+    });
+    cleanupCb.checked = state.updateCleanup;
+    root.append(el('label', { class: 'choice', for: 'update-cleanup' }, cleanupCb,
+      el('span', { class: 'choice__body' },
+        el('span', { class: 'choice__title', text: 'Удалить старые fallback-модели' }),
+        el('span', { class: 'choice__desc', id: 'update-cleanup-d', text: 'Необязательно. Удаляет виртуальные fallback-модели, переносит резервы специалистов в Oh My DSH Slim и заменяет relay fallback обычным прокси. Основная модель останется без автоматического fallback. Перенос резервов включается автоматически. Если настройки нельзя безопасно изменить, предпросмотр покажет конфликт.' }))));
+    if (state.updateCleanup) {
+      const model = el('input', { type: 'text', id: 'update-main-model', value: state.updateMainModel, list: 'update-models', disabled: !!state.busy, 'aria-describedby': 'update-main-model-d',
+        onchange: () => { state.updateMainModel = model.value; invalidateUpdate('update-main-model'); },
+        oninput: () => {
+          state.updateMainModel = model.value;
+          if (state.update.preview || state.update.ack || state.update.errors.length) {
+            ++updateSeq;
+            state.update = { status: 'idle', preview: null, ack: false, errors: [], codes: [], result: null };
+            state.animate = false;
+            const pos = model.selectionStart;
+            render(null, 'update-main-model');
+            const next = document.getElementById('update-main-model');
+            if (next && pos !== null) next.setSelectionRange(pos, pos);
+            announce('Модель изменена: предпросмотр нужно построить заново');
+          }
+        },
+      });
+      root.append(el('div', { class: 'card' },
+        el('label', { for: 'update-main-model', text: 'Основная модель' }), model,
+        el('datalist', { id: 'update-models' }, state.models.map((m) => m.replace(/^cliproxy\//, '')).filter((m) => !m.includes('fallback-')).map((m) => el('option', { value: m }))),
+        el('p', { class: 'hint', id: 'update-main-model-d', text: 'Укажите ID реальной модели из каталога профиля, например gpt-6.1-sol. Сервер проверит наличие модели; fallback-алиасы не подходят.' })));
+    }
+
+    const previewing = state.busy === 'update-preview';
+    root.append(el('div', { class: 'card' },
+      el('button', {
+        type: 'button', class: 'btn' + (u.preview ? '' : ' btn--primary'), id: 'btn-update-preview', disabled: !!state.busy, onclick: () => runUpdatePreview(false),
+      }, previewing ? [el('span', { class: 'spinner', 'aria-hidden': 'true' }), 'Строим предпросмотр…'] : (u.preview ? 'Обновить предпросмотр' : 'Показать, что изменится')),
+      el('p', { class: 'hint', text: 'Запрос только проверяет и составляет план. Файлы не меняются.' })));
+
+    if (u.preview) root.append(...updatePreviewBlocks(u.preview));
+
+    const p = u.preview;
+    const applying = state.busy === 'update-apply';
+    const canApply = !!(p && p.canApply);
+    const ready = canApply && u.ack && !state.busy;
+    if (p) {
+      const cb = el('input', {
+        type: 'checkbox', id: 'update-ack', disabled: !canApply || !!state.busy, 'aria-describedby': 'update-ack-d',
+        onchange: () => { state.update = Object.assign({}, state.update, { ack: cb.checked }); state.animate = false; render(null, 'update-ack'); },
+      });
+      cb.checked = u.ack && canApply;
+      root.append(el('label', { class: 'choice', for: 'update-ack' }, cb,
+        el('span', { class: 'choice__body' },
+          el('span', { class: 'choice__title', text: 'Подтверждаю замену файлов установщика' }),
+          el('span', { class: 'choice__desc', id: 'update-ack-d', text: 'Файлы из плана, которыми управляет установщик, будут заменены. Harness закрыт.' }))));
+    }
+    root.append(el('div', { class: 'actions' }, el('span'),
+      el('div', { class: 'actions__group' },
+        el('button', {
+          type: 'submit', class: 'btn btn--primary', id: 'btn-update-apply', disabled: !ready,
+          'aria-describedby': !canApply && p ? 'update-conflicts' : null,
+        }, applying ? [el('span', { class: 'spinner', 'aria-hidden': 'true' }), 'Обновляем…'] : 'Применить обновление'))));
+    if (!p) root.append(el('p', { class: 'hint', text: 'Кнопка «Применить» станет доступна после успешного предпросмотра без конфликтов и вашего подтверждения.' }));
+    return root;
+  }
+
+  function updatePreviewBlocks(p) {
+    const out = [];
+    if (p.conflicts.length) {
+      const c = callout('bad', 'Есть конфликты — применить нельзя',
+        el('ul', null, p.conflicts.map((x) => el('li', null, el('code', { text: x.code || 'UNKNOWN' }),
+          x.text || x.detail ? ' — ' + (x.text || x.detail) : ''))));
+      c.id = 'update-conflicts';
+      out.push(c);
+    }
+    if (p.warnings.length) out.push(callout('warn', 'Предупреждения', el('ul', null, p.warnings.map((w) => el('li', { text: w })))));
+    if (!p.planHash && !p.conflicts.length) out.push(callout('bad', 'План без отпечатка', el('p', { text: 'Сервер не передал идентификатор плана, поэтому применить его нельзя. Постройте предпросмотр заново.' })));
+
+    const card = el('section', { class: 'card', id: 'update-plan', 'aria-labelledby': 'h-upd-plan' },
+      el('h2', { id: 'h-upd-plan', text: 'План обновления' }),
+      el('p', { class: 'small muted', id: 'update-summary', text: p.actions.length
+        ? 'Действий: ' + p.actions.length + ', из них изменят файлы: ' + p.changeCount + '.'
+        : 'Сервер не вернул ни одного действия — менять нечего.' }));
+    if (p.actions.length) {
+      card.append(el('ul', { class: 'plan-list' }, p.actions.map((a) =>
+        el('li', { class: 'plan-item' + (a.noop ? ' plan-item--noop' : '') },
+          el('span', { class: 'plan-op' }, a.label, a.needsAck ? el('small', { class: 'plan-ack', text: 'требует подтверждения' }) : null),
+          el('span', { class: 'plan-body' },
+            el('code', { class: 'plan-path', text: a.path || '—' }),
+            a.reason ? el('span', { class: 'small muted', text: a.reason }) : null)))));
+    }
+    card.append(el('p', { class: 'hint', text: p.requiresRestart
+      ? 'После применения Harness нужно запустить заново.'
+      : 'Сервер не требует перезапуска Harness, но перед применением его всё равно лучше закрыть.' }));
+    card.append(el('p', { class: 'hint', text: 'Резервная копия: путь появится в ответе сервера после применения. Сейчас ничего не сохранено.' }));
+    out.push(card);
+    return out;
+  }
+
+  function updateDone() {
+    const r = state.update.result || { backupPath: '', requiresRestart: true, applied: 0 };
+    return [
+      el('div', { class: 'done-mark', 'aria-hidden': 'true', text: '✓' }),
+      callout('ok', 'Обновление применено', el('p', { text: r.applied ? 'Изменено файлов по плану: ' + r.applied + '.' : 'Сервер подтвердил обновление.' })),
+      el('section', { class: 'card', 'aria-labelledby': 'h-upd-done' },
+        el('h2', { id: 'h-upd-done', text: 'Что дальше' }),
+        r.requiresRestart
+          ? el('p', { id: 'update-restart', text: 'Запустите Harness заново: уже открытая копия не подхватит обновлённые файлы. Установщик его не запускает.' })
+          : el('p', { id: 'update-restart', text: 'Сервер не требует перезапуска Harness. Если он был открыт, проверьте, что изменения подхватились.' }),
+        r.backupPath
+          ? [el('p', { class: 'small muted', text: 'Предыдущие файлы сохранены здесь:' }), el('code', { class: 'path-box', id: 'update-backup', text: r.backupPath })]
+          : el('p', { id: 'update-no-backup', class: 'muted', text: 'Сервер не сообщил путь резервной копии.' })),
+      el('div', { class: 'actions' }, el('span'),
+        el('button', { type: 'button', class: 'btn', id: 'btn-update-again', onclick: () => { resetUpdate(); state.animate = true; render('btn-update-preview'); }, text: 'Построить новый предпросмотр' })),
+    ];
+  }
+
   /* ---------- Рендер ---------- */
 
   function render(focusTarget, keepFocusId) {
     renderRail();
+    const wizard = state.phase === 'wizard';
     const content = state.phase === 'loading' ? renderLoading()
       : state.phase === 'fatal' ? renderFatal()
         : state.phase === 'done' ? renderDone()
-          : [renderTutorial, renderApi, renderMcp, renderRoles, renderReview][state.step]();
+          : state.mode === 'update' ? renderUpdate()
+            : [renderTutorial, renderApi, renderMcp, renderRoles, renderReview][state.step]();
 
     $panel.textContent = '';
     $panel.classList.remove('enter');
     if (state.animate) { void $panel.offsetWidth; $panel.classList.add('enter'); }
+    if (wizard) $panel.append(modeSwitch());
     $panel.append(content);
-    document.title = 'DSH Setup — ' + (state.phase === 'wizard' ? STEPS[state.step].title : 'установка');
+    document.title = 'DSH Setup — ' + (state.phase === 'wizard' ? (state.mode === 'update' ? 'обновление' : STEPS[state.step].title) : 'установка');
 
     const target = focusTarget || keepFocusId;
     if (target && focusId(target)) return;

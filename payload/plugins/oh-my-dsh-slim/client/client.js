@@ -43,7 +43,7 @@ window.__ModuleLoader__.load({
     // no build step or package metadata, so this is a literal; T0 and
     // client-card.test.mjs compare it with package.json so a release bump
     // cannot silently leave the header stale.
-    const VERSION = '0.8.7';
+    const VERSION = '0.8.7-native.1';
     const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
     const COUNCILLOR_ROLE_IDS = ['councillor-alpha', 'councillor-beta', 'councillor-gamma'];
     // Council's synthesizer has no user-facing enable switch: it is active
@@ -313,6 +313,57 @@ window.__ModuleLoader__.load({
     /** Granted names that are not an exact, unambiguous MCP tool name: they block Save, never dropped silently. */
     const sharedMcpInvalid = (role) => (role?.sharedMcpTools ?? []).filter((name) => !isMcpToolNameUi(name));
 
+    // Backup routes (`fallbacks`): an ordered list of at most three
+    // provider/model routes, each with an optional effort. Only the five
+    // specialists carry them — never the observer, the council, or the main
+    // model, which are owned elsewhere. A fallback names a catalog route, not an alias.
+    const FALLBACK_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian'];
+    const MAX_FALLBACKS = 3;
+
+    /**
+     * Canonical form of a stored or edited fallback list: plain
+     * {provider, model, effort?} entries ('none' effort is the same as absent).
+     * Draft rows may still lack a half of the route — fallbackIssues blocks Save on them.
+     * @returns the list, or undefined when `list` is not an array.
+     */
+    function normalizeFallbacks(list) {
+      if (!Array.isArray(list)) return undefined;
+      return list.map((entry) => {
+        const out = {
+          provider: typeof entry?.provider === 'string' && entry.provider !== '' ? entry.provider : undefined,
+          model: typeof entry?.model === 'string' && entry.model !== '' ? entry.model : undefined,
+        };
+        if (typeof entry?.effort === 'string' && entry.effort !== '' && entry.effort !== 'none') out.effort = entry.effort;
+        return out;
+      });
+    }
+
+    /**
+     * Problems that must block Save for one role's fallbacks. Pure.
+     * @returns {{kind: 'tooMany'|'half'|'duplicate'|'primary'|'effort', index: number}[]} one entry per kind.
+     */
+    function fallbackIssues(roleId, role, groups) {
+      const list = FALLBACK_ROLE_IDS.includes(roleId) && Array.isArray(role?.fallbacks) ? role.fallbacks : [];
+      const found = [];
+      const add = (kind, index) => { if (!found.some((item) => item.kind === kind)) found.push({ kind, index }); };
+      if (list.length > MAX_FALLBACKS) add('tooMany', MAX_FALLBACKS);
+      const seen = new Set();
+      list.forEach((entry, index) => {
+        const provider = typeof entry?.provider === 'string' ? entry.provider : '';
+        const model = typeof entry?.model === 'string' ? entry.model : '';
+        if (provider === '' || model === '') { add('half', index); return; }
+        const key = `${provider}/${model}`;
+        if (seen.has(key)) add('duplicate', index);
+        seen.add(key);
+        if (roleRouted(role) && role.provider === provider && role.model === model) add('primary', index);
+        const effort = entry.effort;
+        if (effort !== undefined && effort !== '' && effort !== 'none') {
+          if (!EFFORT_RE.test(effort) || (role?.enabled !== false && effortMismatch(effort, groups, provider, model))) add('effort', index);
+        }
+      });
+      return found;
+    }
+
     /** Stored server document -> the row/text form the editor edits. */
     function serverToForm(server) {
       const s = server ?? {};
@@ -485,6 +536,20 @@ window.__ModuleLoader__.load({
       sharedMcpNone: '未授权任何共享工具（默认全部拒绝）。',
       sharedMcpRemoveHint: '点击名称即可移除该授权。',
       sharedMcpAdd: '添加授权',
+      fallbacks: '备用模型',
+      fallbacksNote: '主模型未能完成这次尝试（或提供方超时）时，会按顺序在下面的路线上重试同一次调用，最多 3 条。这只是重试一次尝试，不会切换会话。备用模型未设置强度时，角色和会话的强度都会被丢弃，使用该模型自己的默认值。主模型（main）单独管理，专家角色不使用别名。',
+      fallbacksNone: '未设置备用模型。',
+      fallbacksAdd: '添加备用模型',
+      fallbacksMax: '最多 3 条。',
+      fallbackPick: '选择模型',
+      fallbacksUp: '上移',
+      fallbacksDown: '下移',
+      fallbacksRemove: '删除',
+      fallbackIssue_tooMany: '备用模型最多 3 条。',
+      fallbackIssue_half: '第 {n} 条备用模型未选完整：需要同时选择提供方和模型。',
+      fallbackIssue_duplicate: '第 {n} 条备用模型重复了。',
+      fallbackIssue_primary: '第 {n} 条备用模型与本角色的主模型相同。',
+      fallbackIssue_effort: '第 {n} 条备用模型的推理强度不被该模型支持。',
       sharedMcpInvalid: '共享工具名无效：{names}。请使用完整的 mcp__server__tool 名称（服务器名和工具名中都不能含“__”）。移除后才能保存。',
       sharedWarn_disabled: '此角色已停用，共享工具授权不会生效。',
       sharedWarn_denied: '“{name}”在拒绝列表中，拒绝优先，授权不会生效。',
@@ -674,6 +739,20 @@ window.__ModuleLoader__.load({
       sharedMcpNone: 'No shared tools granted (everything is denied by default).',
       sharedMcpRemoveHint: 'Click a name to remove that grant.',
       sharedMcpAdd: 'Add grant',
+      fallbacks: 'Backup models',
+      fallbacksNote: 'If the primary model cannot finish an attempt (or the provider times out), the same call is retried on these routes in order, up to 3. Only the attempt is retried; the session does not switch models. If a backup has no effort, the role\u2019s and the session\u2019s effort are dropped and the model\u2019s own default applies. The main model is owned separately, and specialists use no aliases.',
+      fallbacksNone: 'No backup models set.',
+      fallbacksAdd: 'Add backup model',
+      fallbacksMax: 'Up to 3 routes.',
+      fallbackPick: 'Choose a model',
+      fallbacksUp: 'Move up',
+      fallbacksDown: 'Move down',
+      fallbacksRemove: 'Remove',
+      fallbackIssue_tooMany: 'At most 3 backup models.',
+      fallbackIssue_half: 'Backup model {n} is incomplete: pick both a provider and a model.',
+      fallbackIssue_duplicate: 'Backup model {n} repeats an earlier one.',
+      fallbackIssue_primary: 'Backup model {n} is the same as this role\u2019s primary model.',
+      fallbackIssue_effort: 'The effort of backup model {n} is not supported by that model.',
       sharedMcpInvalid: 'Invalid shared tool name: {names}. Use an exact mcp__server__tool name with no "__" inside the server or tool part. Remove it to save.',
       sharedWarn_disabled: 'This role is disabled, so its shared tool grants have no effect.',
       sharedWarn_denied: '"{name}" is in the denied list; deny wins, so the grant has no effect.',
@@ -854,7 +933,7 @@ window.__ModuleLoader__.load({
       const roles = {};
       for (const [roleId, role] of Object.entries(draft?.roles ?? {})) {
         // Absent and [] grants are the same policy (deny), so they compare equal.
-        roles[roleId] = Object.fromEntries(Object.entries(role).map(([key, value]) => [key, value === '' || (key === 'sharedMcpTools' && Array.isArray(value) && value.length === 0) ? undefined : value]));
+        roles[roleId] = Object.fromEntries(Object.entries(role).map(([key, value]) => [key, value === '' || ((key === 'sharedMcpTools' || key === 'fallbacks') && Array.isArray(value) && value.length === 0) ? undefined : value]));
       }
       return { ...draft, roles };
     }
@@ -934,6 +1013,10 @@ window.__ModuleLoader__.load({
           // [] both deny, but they stay distinct here so a stored [] is not
           // rewritten and an absent field is not turned into one.
           sharedMcpTools: asList(adv.sharedMcpTools) ?? asList(ov.sharedMcpTools) ?? asList(baseRole.sharedMcpTools),
+          // Ordered backup routes, whole-list replace like the grants above.
+          fallbacks: FALLBACK_ROLE_IDS.includes(roleId)
+            ? normalizeFallbacks(asList(adv.fallbacks) ?? asList(ov.fallbacks) ?? asList(baseRole.fallbacks))
+            : undefined,
         };
       }
       const orchPath = activeOrchestratorPath(src, presetName);
@@ -1035,6 +1118,20 @@ window.__ModuleLoader__.load({
             for (const path of holders) ops.push({ op: 'unset', path: [...path, 'sharedMcpTools'] });
           } else if (!(dv.length === 0 && stored === undefined) && !deepEqualJson(dv, stored)) {
             ops.push({ op: 'set', path: [...(holders[0] ?? ovPath), 'sharedMcpTools'], value: dv });
+          }
+        }
+        // fallbacks: the whole ordered list is replaced, never merged. Equal to
+        // the shipped list (or empty with nothing shipped) means inherit: unset.
+        // Otherwise the highest layer that already holds it is edited in place.
+        if (FALLBACK_ROLE_IDS.includes(roleId)) {
+          const dv = normalizeFallbacks(asList(d.fallbacks));
+          const bv = normalizeFallbacks(asList(baseRole.fallbacks));
+          const holders = [advPath, ovPath].filter((path) => getPath(user, [...path, 'fallbacks']) !== undefined);
+          const stored = holders.length > 0 ? normalizeFallbacks(getPath(user, [...holders[0], 'fallbacks'])) : undefined;
+          if (dv === undefined || deepEqualJson(dv, bv) || (dv.length === 0 && bv === undefined)) {
+            for (const path of holders) ops.push({ op: 'unset', path: [...path, 'fallbacks'] });
+          } else if (!deepEqualJson(dv, stored)) {
+            ops.push({ op: 'set', path: [...(holders[0] ?? ovPath), 'fallbacks'], value: dv });
           }
         }
         // deny is additive over the base: write only the extras.
@@ -1352,6 +1449,15 @@ window.__ModuleLoader__.load({
         if (roleId !== COUNCIL_ROLE_ID && Array.isArray(role.tools) && !deepEqualJson(role.tools, baseRole.tools)) record.tools = role.tools;
         if (!NO_MCP_ROLES.has(roleId) && !deepEqualJson(role.mcps ?? [], baseRole.mcps ?? [])) record.mcps = role.mcps ?? [];
         let sharedInAdvanced;
+        let fallbacksInAdvanced;
+        if (FALLBACK_ROLE_IDS.includes(roleId) && Array.isArray(role.fallbacks)) {
+          const dv = normalizeFallbacks(role.fallbacks);
+          const bv = normalizeFallbacks(baseRole.fallbacks);
+          if (!deepEqualJson(dv, bv) && !(dv.length === 0 && bv === undefined)) {
+            if (asList(config.advanced?.roles?.[roleId]?.fallbacks) !== undefined) fallbacksInAdvanced = dv;
+            else record.fallbacks = dv;
+          }
+        }
         if (!NO_MCP_ROLES.has(roleId) && Array.isArray(role.sharedMcpTools)) {
           // A stored [] is kept as [] only while the document already had one;
           // an emptied draft of an absent field writes nothing.
@@ -1372,6 +1478,7 @@ window.__ModuleLoader__.load({
         if (Object.keys(record).length > 0) put(config.roles?.[roleId] !== undefined ? 'roles' : 'presets', roleId, record);
         const advanced = {};
         if (sharedInAdvanced !== undefined) advanced.sharedMcpTools = sharedInAdvanced;
+        if (fallbacksInAdvanced !== undefined) advanced.fallbacks = fallbacksInAdvanced;
         for (const field of ADVANCED_FIELDS) {
           const value = role[field];
           if (value === undefined || value === '' || deepEqualJson(value, baseRole[field])) continue;
@@ -1526,7 +1633,7 @@ window.__ModuleLoader__.load({
       );
     }
 
-    function ModelSelect({ groups, status, provider, model, onChange, disabled, t }) {
+    function ModelSelect({ groups, status, provider, model, onChange, disabled, t, emptyLabel, ariaLabel }) {
       // A route is BOTH halves or neither (issue #11). A provider without a
       // model cannot describe a reachable target, and filling the missing half
       // from the session would pair one provider id with another provider's
@@ -1543,7 +1650,7 @@ window.__ModuleLoader__.load({
         // role runs on until the user pins a model, and the only way BACK after
         // pinning one. It stays available while the catalog loads, because
         // following the session model needs no catalog at all.
-        React.createElement('option', { key: 'inherit', value: '' }, t('modelInherit')),
+        React.createElement('option', { key: 'inherit', value: '' }, emptyLabel ?? t('modelInherit')),
       ];
       if (routed && !known) {
         options.push(React.createElement('option', { key: 'current', value: synthetic }, `${t('currentValueTag')}: ${synthetic}`));
@@ -1562,7 +1669,7 @@ window.__ModuleLoader__.load({
         options.push(React.createElement('option', { key: 'catalog', value: '__catalog__', disabled: true }, notice));
       }
       return React.createElement('select', {
-        value: synthetic, disabled, 'aria-label': t('model'),
+        value: synthetic, disabled, 'aria-label': ariaLabel ?? t('model'),
         onChange: (e) => {
           const next = e.target.value;
           // Clearing BOTH halves is what "inherit" persists as: the bundled
@@ -1711,6 +1818,9 @@ window.__ModuleLoader__.load({
             })) : null,
           (invalid.maxTokens || invalid.temperature || invalid.personaAppend) ? React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' } },
             invalid.personaAppend ? t('personaAppendInvalid') : invalid.maxTokens ? t('invalidMaxTokens') : t('invalidTemperature')) : null,
+          FALLBACK_ROLE_IDS.includes(roleId)
+            ? React.createElement(FallbackField, { roleId, role, groups, modelsStatus, onChange, locked, t })
+            : null,
           React.createElement(PolicySection, { roleId, role, baseDeny, baseTools, serverNames, onChange, locked, t }),
           roleId === COUNCIL_ROLE_ID ? React.createElement('span', { style: smallText }, t('councilRestriction')) : null,
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, color: color.warn, fontSize: 12, background: color.warnBg, borderRadius: 8, padding: '6px 8px' } },
@@ -1825,6 +1935,70 @@ window.__ModuleLoader__.load({
           })),
         invalid.length > 0 ? React.createElement('span', { role: 'alert', 'data-shared-invalid': roleId, style: { fontSize: 12, color: errorColor } }, t('sharedMcpInvalid').replace('{names}', invalid.join(', '))) : null,
         ...warnings.map((item) => React.createElement('span', { key: item.kind + item.detail, 'data-shared-warning': item.kind, style: { fontSize: 12, lineHeight: '16px', color: color.warn } }, t('sharedWarn_' + item.kind).replace('{name}', item.detail))));
+    }
+
+    /**
+     * Backup routes for one specialist: an ordered list of up to three
+     * provider/model routes from the catalog, each with an optional effort the
+     * chosen model declares. It is a whole-list value (replace on save). The
+     * rows are edited in place; a half-filled row, a repeat, the role's own
+     * primary route or an effort the model lacks blocks Save and says why.
+     */
+    function FallbackField({ roleId, role, groups, modelsStatus, onChange, locked, t }) {
+      const list = Array.isArray(role.fallbacks) ? role.fallbacks : [];
+      const issues = fallbackIssues(roleId, role, groups);
+      const set = (next) => onChange(roleId, { fallbacks: next });
+      const patchRow = (index, patch) => set(list.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
+      const move = (index, delta) => {
+        const target = index + delta;
+        if (target < 0 || target >= list.length) return;
+        const next = list.slice();
+        [next[index], next[target]] = [next[target], next[index]];
+        set(next);
+      };
+      const iconButton = (label, disabled, onClick, text, extra) => React.createElement('button', {
+        type: 'button', 'aria-label': label, title: label, disabled, onClick,
+        style: {
+          flex: 'none', minWidth: 28, height: 28, borderRadius: 8, border: `1px solid ${color.border}`, background: 'transparent',
+          color: color.secondary, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.4 : 1, fontFamily: 'inherit', fontSize: 12, ...extra,
+        },
+      }, text);
+      return React.createElement('div', { 'data-fallbacks': roleId, style: { display: 'flex', flexDirection: 'column', gap: 6, borderTop: `1px dashed ${color.border}`, paddingTop: 8 } },
+        React.createElement('span', { style: { fontSize: 12, lineHeight: '18px', color: color.secondary } }, t('fallbacks')),
+        React.createElement('span', { style: smallText }, t('fallbacksNote')),
+        list.length === 0 ? React.createElement('span', { 'data-fallbacks-empty': '', style: smallText }, t('fallbacksNone')) : null,
+        ...list.map((entry, index) => {
+          const options = effortOptionsFor(groups, entry.provider, entry.model);
+          return React.createElement('div', { key: index, 'data-fallback-row': index, style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 } },
+            React.createElement('span', { style: { fontSize: 11, color: color.tertiary, flex: 'none', width: 16 } }, `${index + 1}.`),
+            React.createElement('div', { style: { flex: '1 1 200px', minWidth: 0 } },
+              React.createElement(ModelSelect, {
+                groups, status: modelsStatus, provider: entry.provider, model: entry.model, disabled: locked, t,
+                emptyLabel: t('fallbackPick'), ariaLabel: `${t('fallbacks')} ${index + 1}: ${t('model')}`,
+                onChange: (provider, model) => {
+                  const keepEffort = entry.effort !== undefined && provider !== undefined
+                    && effortOptionsFor(groups, provider, model).some((option) => option.value === entry.effort);
+                  patchRow(index, { provider, model, effort: keepEffort ? entry.effort : undefined });
+                },
+              })),
+            React.createElement('select', {
+              value: entry.effort ?? 'none', disabled: locked, 'aria-label': `${t('fallbacks')} ${index + 1}: ${t('effort')}`,
+              onChange: (e) => patchRow(index, { effort: e.target.value === 'none' ? undefined : e.target.value }),
+              className: 'omds-select', style: { width: 150, flex: 'none' },
+            }, options.map((option) => React.createElement('option', { key: option.value, value: option.value }, effortLabel(option, t)))),
+            iconButton(t('fallbacksUp'), locked || index === 0, () => move(index, -1), '\u2191'),
+            iconButton(t('fallbacksDown'), locked || index === list.length - 1, () => move(index, 1), '\u2193'),
+            iconButton(t('fallbacksRemove'), locked, () => set(list.filter((_, i) => i !== index)), '\u00d7'));
+        }),
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          React.createElement(ui.Button, {
+            variant: 'outline', size: 'sm', disabled: locked || list.length >= MAX_FALLBACKS,
+            onClick: () => set([...list, { provider: undefined, model: undefined }]),
+          }, t('fallbacksAdd')),
+          list.length >= MAX_FALLBACKS ? React.createElement('span', { style: smallText }, t('fallbacksMax')) : null),
+        ...issues.map((item) => React.createElement('span', {
+          key: item.kind, role: 'alert', 'data-fallback-issue': item.kind, style: { fontSize: 12, lineHeight: '16px', color: errorColor },
+        }, t('fallbackIssue_' + item.kind).replace('{n}', String(item.index + 1)))));
     }
 
     /** Per-role tools / deny policy (+ MCP when it is not a primary field). Restrictions are explained, never faked. */
@@ -2200,6 +2374,7 @@ window.__ModuleLoader__.load({
         || Object.entries(current.servers ?? {}).some(([name, form]) => !serverNameUsable(name) || formToServer(form).errors.length > 0)
         || ROLE_IDS.some((roleId) => mcpViolation(roleId, current.roles[roleId])
           || sharedMcpInvalid(current.roles[roleId]).length > 0
+          || fallbackIssues(roleId, current.roles[roleId], models.groups).length > 0
           || [...(current.roles[roleId].tools ?? []), ...(current.roles[roleId].deny ?? [])].some((name) => !isKnownToolName(name)));
 
       // Browser fallback only: while edits are unsaved, reloading or closing the
@@ -2981,6 +3156,10 @@ window.__ModuleLoader__.load({
     exports.mcpViolation = mcpViolation;
     exports.sharedMcpWarnings = sharedMcpWarnings;
     exports.sharedMcpInvalid = sharedMcpInvalid;
+    exports.fallbackIssues = fallbackIssues;
+    exports.normalizeFallbacks = normalizeFallbacks;
+    exports.FallbackField = FallbackField;
+    exports.FALLBACK_ROLE_IDS = FALLBACK_ROLE_IDS;
     exports.activeRoleOverride = activeRoleOverride;
     exports.activeOrchestratorPath = activeOrchestratorPath;
     exports.PolicySection = PolicySection;

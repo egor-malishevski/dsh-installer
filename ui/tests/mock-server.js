@@ -113,6 +113,33 @@ function createServer(opts) {
           if (o.realShapeInstall) return send(200, { ok: true, profilePath: '/Users/test/.dsh/profiles/desktop', backupPath: null, rollback: { instructions: 'Remove the installed profile and installer files only after confirming they are no longer needed.' }, warnings: [] });
           return send(200, { ok: true, profilePath: '/Users/test/.dsh', backupPath: '/tmp/dsh-backup-test', rollback: { steps: ['Остановите DSH', 'Верните файлы из копии'] } });
         }
+        if (url.pathname === '/api/update') {
+          // Макет /api/update: ничего не пишет. Ответы повторяют согласованную форму.
+          const b = JSON.parse(body || '{}');
+          // Хэш привязан к выбору переноса: план без переноса нельзя применить с переносом и наоборот.
+          const hash = 'plan-hash-' + (o.updateRevision || 1) + (b.migrateNativeFallbacks === true ? '-migrate' : '');
+          if (b.dryRun === true) {
+            if (o.updatePreviewFail) return send(409, { ok: false, code: 'HARNESS_RUNNING', error: 'Quit DeepSeek Harness before installation.' });
+            if (o.updateDelay) return setTimeout(() => send(200, { ok: true, dryRun: true, actions: [], conflicts: [], backupPath: null, requiresRestart: true, planHash: hash }), o.updateDelay);
+            return send(200, {
+              ok: true, dryRun: true, backupPath: null, requiresRestart: o.updateRequiresRestart !== false, planHash: o.updateNoHash ? undefined : hash,
+              actions: [
+                { path: 'profiles/desktop/config.json', op: 'replace', reason: 'managed-file-changed' },
+                { path: 'profiles/desktop/agents/new.md', op: 'create', reason: 'new-in-release' },
+                { path: 'profiles/desktop/keep.md', op: 'skip', reason: 'already-current' },
+              ],
+              conflicts: o.updateConflicts || [],
+              warnings: (o.updateWarnings || []).concat(b.migrateNativeFallbacks === true ? ['NATIVE_FALLBACK_MIGRATION'] : []),
+            });
+          }
+          if (b.dryRun === false) {
+            if (b.planHash !== hash || b.acknowledgeManagedFiles !== true) return send(409, { ok: false, code: 'STALE_PLAN', error: 'stale' });
+            if (o.updateStaleOnApply) { o.updateRevision = (o.updateRevision || 1) + 1; o.updateStaleOnApply = false; return send(409, { ok: false, code: 'STALE_PLAN', error: 'stale' }); }
+            if (o.updateApplyFail) return send(500, { ok: false, code: 'UPDATE_FAILED<script>', error: 'Failed with ' + 'sk-secret-leak-9999' });
+            return send(200, { ok: true, dryRun: false, actions: [{ path: 'a', op: 'replace' }, { path: 'b', op: 'skip' }], conflicts: [], backupPath: '/tmp/dsh-backup-update', requiresRestart: true, planHash: hash });
+          }
+          return send(400, { ok: false, code: 'INVALID' });
+        }
         return send(404, { ok: false });
       });
       return;

@@ -217,3 +217,66 @@ test('normalizePreflight: blockers при ok:true, префиксы и секр�
   assert.deepEqual(C.normalizePreflight({ ok: true }, []).blockers, []);
   assert.equal(C.normalizePreflight(null, []).fileCount, null);
 });
+
+test('обновление: предпросмотр разбирается, применить можно только чистый план с отпечатком', () => {
+  const good = C.normalizeUpdatePreview({ ok: true, dryRun: true, planHash: 'hash-12345678', actions: [
+    { path: 'a.json', op: 'replace', reason: 'x' }, { path: 'b', op: 'skip' }], conflicts: [], requiresRestart: true }, []);
+  assert.equal(good.canApply, true);
+  assert.equal(good.changeCount, 1);
+  assert.equal(C.normalizeUpdatePreview({ ok: true, actions: [], conflicts: ['USER_MODIFIED'], planHash: 'hash-12345678' }, []).canApply, false);
+  assert.equal(C.normalizeUpdatePreview({ ok: true, actions: [], conflicts: [] }, []).canApply, false, 'без planHash');
+  assert.equal(C.normalizeUpdatePreview({ ok: true, planHash: 'hash-12345678' }, []).canApply, false, 'без actions');
+  assert.equal(C.normalizeUpdatePreview({ ok: false, actions: [], planHash: 'hash-12345678' }, []).canApply, false);
+  assert.equal(C.normalizeUpdatePreview({ ok: true, dryRun: false, actions: [], planHash: 'hash-12345678' }, []).canApply, false);
+});
+
+test('обновление: тело apply строится только из пригодного плана и подтверждения', () => {
+  const p = C.normalizeUpdatePreview({ ok: true, actions: [], conflicts: [], planHash: 'hash-12345678' }, []);
+  assert.deepEqual(C.buildUpdateApplyBody(p, true), { dryRun: false, planHash: 'hash-12345678', acknowledgeManagedFiles: true, migrateNativeFallbacks: false });
+  assert.equal(C.buildUpdateApplyBody({ ...p, migrateNativeFallbacks: true }, true).migrateNativeFallbacks, true);
+  assert.deepEqual(C.buildUpdatePreviewBody(), { dryRun: true, migrateNativeFallbacks: false });
+  assert.deepEqual(C.buildUpdatePreviewBody(true), { dryRun: true, migrateNativeFallbacks: true });
+  assert.deepEqual(C.buildUpdatePreviewBody('yes'), { dryRun: true, migrateNativeFallbacks: false }, 'только строгий true');
+  const options = C.buildUpdatePreviewBody(false, true, 'gpt-6.1-sol');
+  assert.deepEqual(options, { dryRun: true, migrateNativeFallbacks: true, cleanupLegacyFallbacks: true, mainModel: 'gpt-6.1-sol' });
+  assert.deepEqual(C.buildUpdateApplyBody({ ...p, ...options }, true), { ...options, dryRun: false, planHash: p.planHash, acknowledgeManagedFiles: true });
+  assert.throws(() => C.buildUpdatePreviewBody(false, true, 'fallback-main'), /CLEANUP_MAIN_MODEL_INVALID/);
+  assert.match(C.normalizeUpdatePreview({ ok: true, actions: [], planHash: 'hash-12345678', warnings: ['NATIVE_FALLBACK_MIGRATION', 'ALIAS_STILL_REFERENCED'] }, []).warnings.join(' '), /перенесены в Oh My DSH Slim[\s\S]*алиас/);
+  assert.throws(() => C.buildUpdateApplyBody(p, false), /CONFIRMATION_REQUIRED/);
+  assert.throws(() => C.buildUpdateApplyBody(null, true), /PREVIEW_REQUIRED/);
+  const bad = C.normalizeUpdatePreview({ ok: true, actions: [], conflicts: ['X'], planHash: 'hash-12345678' }, []);
+  assert.throws(() => C.buildUpdateApplyBody(bad, true), /PREVIEW_REQUIRED/);
+});
+
+test('обновление: коды ошибок чистятся и не пропускают секреты', () => {
+  const r = C.normalizeUpdateProblems({ status: 500, data: { ok: false, code: 'UPDATE_FAILED<b>', error: 'bad sk-secret-1234' } }, ['sk-secret-1234']);
+  assert.ok(!/[<>]/.test(r.code));
+  assert.ok(!JSON.stringify(r).includes('sk-secret-1234'));
+  assert.equal(C.normalizeUpdateProblems({ status: 409, data: { ok: false, code: 'STALE_PLAN' } }, []).stale, true);
+  assert.equal(C.extractUpdateResult({ ok: true, backupPath: '/tmp/b', requiresRestart: true, actions: [{ op: 'replace' }, { op: 'skip' }] }, []).applied, 1);
+});
+
+test('обновление: сообщения для YAML и сохранённого алиаса', () => {
+  const text = (code) => C.normalizeUpdateProblems({ status: 409, data: { code } }, []).messages[0].message;
+  assert.equal(text('PATCH_UNPARSEABLE'), 'Не удалось безопасно разобрать профиль. Проверьте синтаксис JSON/YAML.');
+  assert.equal(text('PATCH_YAML_UNSUPPORTED'), 'Профиль содержит YAML-конструкции, которые пока нельзя безопасно изменить. Файлы не изменены.');
+  const p = C.normalizeUpdatePreview({ ok: true, actions: [{ op: 'skip', path: 'profile.yaml', reason: 'YAML_ALIAS_PRESERVED' }], conflicts: ['PATCH_YAML_UNSUPPORTED'], planHash: 'hash-12345678' }, []);
+  assert.match(p.actions[0].reason, /алиасы моделей специалистов.*ссылок и комментариев/);
+  assert.match(p.conflicts[0].text, /YAML-конструкции/);
+  assert.equal(p.canApply, false);
+});
+
+test('обновление: реальные коды API получают русский текст', () => {
+  const codes = ['PROFILE_MISSING', 'PIN_CONFLICT', 'LINK_CONFLICT', 'UNEXPECTED_LOCK', 'APP_INCOMPATIBLE', 'ENV_CHECK_FAILED',
+    'PACKAGE_UNPARSEABLE', 'PACKAGE_SHAPE', 'PATCH_UNPARSEABLE', 'PATCH_SHAPE', 'PATCH_ENTRY_MISSING', 'DUPLICATE_ENTRY',
+    'UNSAFE_PATH', 'UNSAFE_PAYLOAD', 'READ_FAILED', 'APP_RUNNING', 'LOCKED'];
+  for (const code of codes) {
+    const r = C.normalizeUpdateProblems({ status: 409, data: { ok: false, code, error: 'raw english' } }, []);
+    assert.equal(r.code, code);
+    assert.match(r.messages[0].message, /[А-Яа-я]/, code);
+    assert.ok(!/raw english/.test(r.messages[0].message), code);
+    const prev = C.normalizeUpdatePreview({ ok: true, actions: [], conflicts: [code], planHash: 'hash-12345678' }, []);
+    assert.equal(prev.canApply, false);
+    if (code !== 'LOCKED') assert.match(prev.conflicts[0].text, /[А-Яа-я]/, 'конфликт ' + code);
+  }
+});

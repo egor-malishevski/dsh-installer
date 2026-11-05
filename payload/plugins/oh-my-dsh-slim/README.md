@@ -2,6 +2,10 @@
 
 **oh-my-dsh-slim · 0.8.7 · DSH 0.2 compatibility line**
 
+> **Curated fork build `0.8.7-native.1`** (installer payload) is based on upstream `0.8.7` and adds
+> native fallback chains for the five specialists. Version numbers, install specs and release
+> notes below describe upstream `0.8.7` unless stated otherwise.
+
 A port of [oh-my-opencode-slim](https://github.com/alvinunreal/oh-my-opencode-slim)'s specialist
 subagent delegation for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
 an orchestrator plus five enabled specialist roles, delivered as a **declarative native agent
@@ -137,7 +141,9 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
   it; say "don't use council" to opt out.
 - Cost: at least four model sessions (three seats + synthesis) per run — the
   most expensive path in the preset; use it deliberately.
-- Limits: fixed three seats, no fallback chains, no `@council` mention routing;
+- Limits: fixed three seats, no fallback chains **for council seats and the synthesizer** (the
+  five specialists have them in the native line, see [Fallback chains](#fallback-chains-native-line)),
+  no `@council` mention routing;
   the section is injected only into the top-level agent, and a cold-resumed seat
   stays read-only.
 - Troubleshooting: if the card says Council is active but a new session has no
@@ -147,6 +153,38 @@ are enabled, and a single enabled seat is an ordinary read-only delegation.
   `maxActiveSubagents` pool (default 8); there is no code-level timeout or kill switch (abort the
   run manually if a seat hangs); per-seat MCP is **intentionally disabled** (MCP tools bypass
   `tools.restrict`).
+
+## Fallback chains (native line)
+
+> Applies to the curated fork build **`0.8.7-native.1`** shipped in this installer payload (ready
+> state, not a published upstream release). Upstream `ninipa/oh-my-dsh-slim@0.8.7` has no such
+> feature. Not live-smoke tested; see limitations below.
+
+- **Scope: the five specialist roles** (oracle, designer, fixer, explorer, librarian). Each role may
+  declare up to **3 fallbacks**, each `{provider, model, effort?}`. The council seats and the
+  synthesizer, and any orchestrator, do **not** get fallback chains.
+- **Retry model:** a failure retries the same LLM step on the next chain entry through hooks; the
+  subagent is not re-run from scratch. The chain is bounded and the host performs the retry.
+- **Triggers:** quota, rate limit, server errors, timeouts, transport errors, empty responses,
+  unknown errors, and PIAI errors. Cancellation is honoured and does not advance the chain.
+  **AUTH errors and invalid-context errors are unsupported** and pass through unchanged.
+- **Effort:** the primary's effort is preserved on the primary. A fallback drops effort unless it
+  declares one explicitly.
+- **Timeouts:** provider idle timeout is 300 s by default. There is no custom per-role first-token
+  timeout.
+- **Cooldowns:** quota 10 min; rate limit 30–600 s; transient errors (2 in 60 s) → 60 s. A success
+  does not reset a cooldown. The chain order is fixed per step; a configuration change takes effect
+  from the next step.
+- **Main model outside Slim:** in an existing migrated setup the main model remains
+  `fallback-main`. A fresh installer sets the main to a real model and **has no main-model fallback
+  implementation**: do not assume all roles, or the main session, are covered.
+- **Migration:** the installer's update mode can convert known cliproxy `fallback-role` aliases of
+  the five roles into native fallbacks (`migrateNativeFallbacks`, opt-in, default off). Implemented
+  in the installer repository, unreleased; requires this `0.8.7-native.1` build. Not live-tested.
+
+Limitations: verified by unit/contract tests with a replayed tool contract, not by a live smoke
+against a real host and real providers. Real provider behaviour (error classification, cooldown
+timing) is not established.
 
 ## Install a released version (then restart)
 

@@ -55,6 +55,9 @@ export function buildConfigSchema(z) {
     // absent allow list into an explicit deny-all during settings resolution.
     tools: z.array(z.string()).default(undefined), deny: z.array(z.string()), mcps: z.array(z.string()), sharedMcpTools: z.array(z.string()).default(undefined),
     personaAppend: z.string(),
+    // Ordered native failover targets (max 3; specialists only, validated by preset/config.js).
+    // `.default(undefined)` keeps an omitted list absent instead of an explicit [].
+    fallbacks: z.array(z.object({ provider: z.string().required(), model: z.string().required(), effort: effort() })).default(undefined),
   });
   const orchestrator = () => z.object({ effort: effort(), mcps: z.array(z.string()) });
   const preset = () => z.object({
