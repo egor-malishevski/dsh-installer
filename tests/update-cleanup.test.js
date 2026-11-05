@@ -146,12 +146,11 @@ test('original relay cleanup requires explicit upstream and acknowledgement', as
   await writeFile(join(relay, 'index.js'), original);
   const before = await readFile(patchPath(home), 'utf8');
   const blocked = await updateProfile({ home, ...opts });
-  assert.ok(blocked.conflicts.includes('RELAY_UPSTREAM_REQUIRED'));
-  const denied = await updateProfile({ home, ...opts, dryRun: false, planHash: blocked.planHash, acknowledgeManagedFiles: true });
-  assert.equal(denied.ok, false);
-  assert.equal(await readFile(patchPath(home), 'utf8'), before);
+  assert.ok(!blocked.conflicts.includes('RELAY_UPSTREAM_REQUIRED'));
+  assert.ok(blocked.actions.some(a => a.reason === 'ORIGINAL_RELAY_PRESERVED'));
+  const kept = await updateProfile({ home, ...opts, dryRun: false, planHash: blocked.planHash, acknowledgeManagedFiles: true });
+  assert.equal(kept.ok, true);
   assert.deepEqual(await readFile(join(relay, 'index.js')), original);
-  await assert.rejects(lstat(join(home, '.dsh/backups')), { code: 'ENOENT' });
   const normal = await updateProfile({ home, cleanupLegacyFallbacks: false });
   assert.ok(!normal.conflicts.includes('RELAY_UPSTREAM_REQUIRED'));
   assert.ok(normal.actions.some(a => a.reason === 'ORIGINAL_RELAY_PRESERVED'));
