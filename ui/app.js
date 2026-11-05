@@ -1418,7 +1418,7 @@
           el('span', { class: 'plan-body' },
             el('code', { class: 'plan-path', text: a.path || '—' }),
             a.reason ? el('span', { class: 'small muted', text: a.reason }) : null,
-            a.details.map((detail) => el('span', { class: 'small muted', text: detail }))))));
+            a.details.map((detail) => el('span', { class: 'small muted', text: detail })))))));
     }
     card.append(el('p', { class: 'hint', text: p.requiresRestart
       ? 'После применения Harness нужно запустить заново.'
