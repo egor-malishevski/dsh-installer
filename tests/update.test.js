@@ -127,6 +127,14 @@ test('legacy JSON credential store becomes YAML and other stores stay untouched'
   const done = await updateProfile({ home, dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true, ...base });
   assert.equal(done.ok, true);
   assert.equal(await readFile(store, 'utf8'), 'version: 1\nrefs:\n  CLIPROXY_API_KEY: "synthetic-key"\n');
+  const readable = await fixture(t);
+  const readableStore = join(readable, '.dsh/.credentials.yaml');
+  await writeFile(readableStore, '{"version":1,"refs":{"CLIPROXY_API_KEY":"synthetic-key"},"records":{}}\n');
+  const readablePreview = await updateProfile({ home: readable, ...base });
+  assert.ok(readablePreview.actions.some(action => action.reason === 'CREDENTIAL_STORE_YAML'));
+  const readableDone = await updateProfile({ home: readable, dryRun: false, planHash: readablePreview.planHash, acknowledgeManagedFiles: true, ...base });
+  assert.equal(readableDone.ok, true);
+  assert.equal(await readFile(readableStore, 'utf8'), 'version: 1\nrefs:\n  CLIPROXY_API_KEY: "synthetic-key"\n');
   const custom = await fixture(t);
   const customStore = join(custom, '.dsh/.credentials.yaml');
   const original = 'version: 1\nrefs:\n  OTHER: "keep-me"\n';
