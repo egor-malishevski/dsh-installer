@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, realpath, rm, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { updateProfile } from '../lib/update.js';
+import { updateProfile, relayCleanupConflict } from '../lib/update.js';
 import { models } from '../lib/profile.js';
 import { createServer } from '../server.js';
 import { createHash } from 'node:crypto';
@@ -115,6 +115,98 @@ for (const source of ["const target = 'fallback-oracle';", "const target = 'fall
     await assert.rejects(updateProfile({ home, ...opts, cleanupLegacyFallbacks: false, dryRun: false, planHash: preview.planHash }), { code: 'STALE_PLAN' });
   });
 }
+
+const originalHash = '77058099982aa362047ff7e565dbc7641783ad507c62bbfbc2fa719479c4cccd';
+const relayRow = (home, upstream) => ({ id: 'zstd-render', name: join(home, '.dsh/plugins/zstd-render/index.js'), config: { upstream } });
+
+test('original relay policy requires unambiguous explicit HTTP upstream', () => {
+  const home = '/example-home';
+  const valid = relayRow(home, 'https://example.test');
+  assert.equal(relayCleanupConflict(originalHash, [valid], false, home), null);
+  for (const value of [undefined, '', 'ftp://example.test', 'not-a-url', ' https://example.test']) {
+    assert.equal(relayCleanupConflict(originalHash, [relayRow(home, value)], false, home), 'RELAY_UPSTREAM_REQUIRED');
+  }
+  assert.equal(relayCleanupConflict(originalHash, [], false, home), 'RELAY_UPSTREAM_REQUIRED');
+  assert.equal(relayCleanupConflict(originalHash, [valid, valid], false, home), 'RELAY_UPSTREAM_REQUIRED');
+  for (const name of [valid.name, `${home}/.dsh/plugins/zstd-render/../zstd-render/index.js`]) {
+    assert.equal(relayCleanupConflict(originalHash, [valid, { id: 'second-relay', name, config: { port: 18318 } }], false, home), 'RELAY_UPSTREAM_REQUIRED');
+  }
+  assert.equal(relayCleanupConflict(originalHash, [valid], true, home), 'RELAY_UPSTREAM_REQUIRED');
+  assert.equal(relayCleanupConflict('unknown', [valid], false, home), 'RELAY_HASH_MISMATCH');
+});
+
+test('original relay cleanup requires explicit upstream and acknowledgement', async t => {
+  const source = process.env.DSH_RELAY_ORIGINAL_FIXTURE;
+  if (!source) return t.skip('set DSH_RELAY_ORIGINAL_FIXTURE to the original relay');
+  const original = await readFile(source);
+  assert.equal(createHash('sha256').update(original).digest('hex'), originalHash);
+  const home = await fixture(t);
+  const relay = join(home, '.dsh/plugins/zstd-render');
+  await mkdir(relay, { recursive: true });
+  await writeFile(join(relay, 'index.js'), original);
+  const before = await readFile(patchPath(home), 'utf8');
+  const blocked = await updateProfile({ home, ...opts });
+  assert.ok(blocked.conflicts.includes('RELAY_UPSTREAM_REQUIRED'));
+  const denied = await updateProfile({ home, ...opts, dryRun: false, planHash: blocked.planHash, acknowledgeManagedFiles: true });
+  assert.equal(denied.ok, false);
+  assert.equal(await readFile(patchPath(home), 'utf8'), before);
+  assert.deepEqual(await readFile(join(relay, 'index.js')), original);
+  await assert.rejects(lstat(join(home, '.dsh/backups')), { code: 'ENOENT' });
+  const normal = await updateProfile({ home, cleanupLegacyFallbacks: false });
+  assert.ok(!normal.conflicts.includes('RELAY_UPSTREAM_REQUIRED'));
+  assert.ok(normal.actions.some(a => a.path.endsWith('/zstd-render/index.js') && a.needsAck));
+  const profile = rows();
+  profile.push(relayRow(home, 'https://example.test'));
+  await writeFile(patchPath(home), JSON.stringify(profile));
+  const preview = await updateProfile({ home, ...opts });
+  assert.deepEqual(preview.conflicts, []);
+  assert.ok(preview.actions.some(a => a.reason === 'RELAY_FALLBACK_REMOVED' && a.needsAck));
+  const noAck = await updateProfile({ home, ...opts, dryRun: false, planHash: preview.planHash });
+  assert.deepEqual(noAck.conflicts, ['ACK_REQUIRED']);
+  const done = await updateProfile({ home, ...opts, dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true });
+  assert.equal(done.ok, true);
+  assert.deepEqual(await readFile(join(relay, 'index.js')), await readFile(new URL('../payload/plugins/zstd-render/index.js', import.meta.url)));
+  assert.deepEqual(JSON.parse(await readFile(patchPath(home), 'utf8')).find(r => r.id === 'zstd-render'), relayRow(home, 'https://example.test'));
+});
+
+test('original relay accepts unrelated opaque YAML but rejects tagged relay evidence', async t => {
+  const source = process.env.DSH_RELAY_ORIGINAL_FIXTURE;
+  if (!source) return t.skip('set DSH_RELAY_ORIGINAL_FIXTURE to the original relay');
+  const original = await readFile(source);
+  assert.equal(createHash('sha256').update(original).digest('hex'), originalHash);
+  const home = await fixture(t);
+  const relay = join(home, '.dsh/plugins/zstd-render');
+  await mkdir(relay, { recursive: true });
+  await writeFile(join(relay, 'index.js'), original);
+  const base = rows().map(row => {
+    if (row.id === 'agent-default-model') row.config.model = 'gpt-6.1-sol';
+    if (row.id === 'llm-pi-ai') row.config.providers.cliproxy.models = models;
+    if (row.id === 'oh-my-dsh-slim') row.config.roles = {};
+    return `- ${JSON.stringify(row)}`;
+  }).join('\n');
+  const name = JSON.stringify(join(relay, 'index.js'));
+  const yaml = (nameTag = '', upstreamTag = '') => `${base}\n- id: auth\n  secret: !!js/function "return 42"\n- id: zstd-render\n  name: ${nameTag}${name}\n  config:\n    upstream: ${upstreamTag}"https://example.test"\n`;
+  const secondRelay = (tag, moduleName) => `- id: second-relay\n  name: ${tag}${JSON.stringify(moduleName)}\n  config: {port: 18318}\n`;
+  for (const text of [yaml('!!js/function '), yaml('', '!!js/function '), yaml() + secondRelay('', join(relay, 'index.js')), yaml() + secondRelay('', `${relay}/../zstd-render/index.js`), yaml() + secondRelay('!!js/function ', join(relay, 'index.js'))]) {
+    await writeFile(patchPath(home), text);
+    const preview = await updateProfile({ home, ...opts });
+    assert.ok(preview.conflicts.includes('RELAY_UPSTREAM_REQUIRED'));
+    const denied = await updateProfile({ home, ...opts, dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true });
+    assert.equal(denied.ok, false);
+    assert.equal(await readFile(patchPath(home), 'utf8'), text);
+    assert.deepEqual(await readFile(join(relay, 'index.js')), original);
+    await assert.rejects(lstat(join(home, '.dsh/backups')), { code: 'ENOENT' });
+  }
+  const text = yaml();
+  await writeFile(patchPath(home), text);
+  const preview = await updateProfile({ home, ...opts });
+  assert.deepEqual(preview.conflicts, []);
+  assert.ok(preview.actions.some(a => a.reason === 'RELAY_FALLBACK_REMOVED' && a.needsAck));
+  const done = await updateProfile({ home, ...opts, dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true });
+  assert.equal(done.ok, true);
+  assert.equal(await readFile(patchPath(home), 'utf8'), text);
+  assert.deepEqual(await readFile(join(relay, 'index.js')), await readFile(new URL('../payload/plugins/zstd-render/index.js', import.meta.url)));
+});
 
 test('options are hashed, validated, and stop guard remains enforced', async t => {
   const home = await fixture(t);

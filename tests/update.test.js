@@ -19,7 +19,7 @@ const oldPatch = [
 ];
 
 async function fixture(t, { pkg = oldPkg, patch = oldPatch } = {}) {
-  const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh-update-')));
+  const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh update-')));
   t.after(() => rm(home, { recursive: true, force: true }));
   await mkdir(join(home, '.dsh/profiles/desktop'), { recursive: true });
   await writeFile(join(home, '.dsh/profiles/desktop/package.json'), JSON.stringify(pkg));
@@ -71,6 +71,51 @@ test('merge preserves custom rows, models, bundles and unknown keys; adds missin
   assert.equal((await lstat(join(home, '.dsh/backups', name))).mode & 0o777, 0o700);
   const manifest = await readFile(join(home, '.dsh/backups', name, 'manifest.json'), 'utf8');
   assert.ok(!manifest.includes('secret') && !manifest.includes('extra-row'));
+});
+
+test('equivalent local links are preserved while missing dependencies are repaired', async t => {
+  const home = await fixture(t);
+  const pkgPath = join(home, '.dsh/profiles/desktop/package.json');
+  const pkg = structuredClone(oldPkg);
+  pkg.dependencies['dsh-integrations'] = `link:${join(home, '.dsh/bundles/dsh-integrations')}`;
+  pkg.dependencies['oh-my-dsh-slim'] = 'link:../../plugins/./other/../oh-my-dsh-slim';
+  await writeFile(pkgPath, JSON.stringify(pkg));
+  const before = await snapshot(home);
+  const preview = await updateProfile({ home, ...base });
+  assert.deepEqual(preview.conflicts, []);
+  assert.deepEqual(await snapshot(home), before);
+  const result = await updateProfile({ home, dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true, ...base });
+  assert.equal(result.ok, true);
+  const repaired = JSON.parse(await readFile(pkgPath, 'utf8'));
+  assert.equal(repaired.dependencies['dsh-integrations'], pkg.dependencies['dsh-integrations']);
+  assert.equal(repaired.dependencies['oh-my-dsh-slim'], pkg.dependencies['oh-my-dsh-slim']);
+  assert.equal(repaired.dependencies['dsh-web-search-exa-parallel'], 'link:../../plugins/dsh-web-search-exa-parallel');
+  const unchanged = await readFile(pkgPath, 'utf8');
+  const again = await updateProfile({ home, ...base });
+  assert.deepEqual(again.conflicts, []);
+  assert.ok(!again.actions.some(a => a.reason === 'PROFILE_MANIFEST_REPAIR'));
+  assert.equal(await readFile(pkgPath, 'utf8'), unchanged);
+});
+
+test('invalid or foreign local links conflict without applying or backing up', async t => {
+  const home = await fixture(t);
+  const pkgPath = join(home, '.dsh/profiles/desktop/package.json');
+  const invalid = ['file:../../plugins/oh-my-dsh-slim', 'https://example.com/plugin', 'link:', 'link:\0', null, 12,
+    'link:../../../plugins/oh-my-dsh-slim', 'link:../../plugins/dsh-web-search-exa-parallel',
+    'link:/Users/egor/.dsh/plugins/oh-my-dsh-slim', 'link:~/.dsh/plugins/oh-my-dsh-slim',
+    'link:$HOME/.dsh/plugins/oh-my-dsh-slim', 'link:../../plugins/oh-my-dsh%2D-slim'];
+  for (const value of invalid) {
+    const pkg = structuredClone(oldPkg);
+    pkg.dependencies['oh-my-dsh-slim'] = value;
+    await writeFile(pkgPath, JSON.stringify(pkg));
+    const before = await snapshot(home);
+    const preview = await updateProfile({ home, ...base });
+    assert.ok(preview.conflicts.includes('LINK_CONFLICT'), String(value));
+    assert.equal(preview.canApply, false);
+    const result = await updateProfile({ home, dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true, ...base });
+    assert.equal(result.ok, false);
+    assert.deepEqual(await snapshot(home), before);
+  }
 });
 
 test('second apply is a no-op without a new backup', async t => {

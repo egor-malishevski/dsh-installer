@@ -266,6 +266,18 @@ test('обновление: сообщения для YAML и сохранённ
   assert.equal(p.canApply, false);
 });
 
+test('обновление: отсутствие проверенного upstream объясняется без адреса', () => {
+  const code = 'RELAY_UPSTREAM_REQUIRED';
+  const text = 'Для замены старого relay нужен явно заданный upstream в профиле; текущий адрес не удалось безопасно подтвердить.';
+  const secret = 'https://user:password@example.com';
+  const problem = C.normalizeUpdateProblems({ status: 409, data: { code, error: secret } }, []);
+  assert.equal(problem.messages[0].message, text);
+  assert.ok(!JSON.stringify(problem).includes(secret));
+  const preview = C.normalizeUpdatePreview({ ok: true, actions: [], conflicts: [code], planHash: 'hash-12345678' }, []);
+  assert.equal(preview.conflicts[0].text, text);
+  assert.equal(preview.canApply, false);
+});
+
 test('обновление: реальные коды API получают русский текст', () => {
   const codes = ['PROFILE_MISSING', 'PIN_CONFLICT', 'LINK_CONFLICT', 'UNEXPECTED_LOCK', 'APP_INCOMPATIBLE', 'ENV_CHECK_FAILED',
     'PACKAGE_UNPARSEABLE', 'PACKAGE_SHAPE', 'PATCH_UNPARSEABLE', 'PATCH_SHAPE', 'PATCH_ENTRY_MISSING', 'DUPLICATE_ENTRY',

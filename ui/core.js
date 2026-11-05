@@ -803,6 +803,7 @@
     CLEANUP_MAIN_MODEL_INVALID: 'Выберите существующий идентификатор обычной модели из каталога, не fallback-алиас.',
     CLEANUP_ALIAS_REFERENCED: 'На fallback-алиас остаются ссылки в настройках. Удалите их вручную и повторите предпросмотр.',
     RELAY_HASH_MISMATCH: 'Relay отличается от ожидаемой версии. Автоматически заменить его нельзя.',
+    RELAY_UPSTREAM_REQUIRED: 'Для замены старого relay нужен явно заданный upstream в профиле; текущий адрес не удалось безопасно подтвердить.',
   };
   const UPDATE_CONFLICT_TEXT = {
     HARNESS_RUNNING: 'Harness запущен — его нужно закрыть.',

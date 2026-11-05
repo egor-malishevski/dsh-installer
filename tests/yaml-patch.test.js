@@ -17,6 +17,19 @@ test('block edits preserve comments, opaque tags, unicode and CRLF', () => {
   assert.equal(parsePatch(out).render(next), out);
 });
 
+test('opaque metadata identifies only exact original tagged scalar paths', () => {
+  const p = parsePatch('- id: other\n  note: !!js/function "noop"\n- id: relay\n  config:\n    upstream: "https://example.test"\n- id: relay2\n  config:\n    upstream: !!custom "https://example.test"\n');
+  assert.equal(p.opaque, true);
+  assert.equal(p.isOpaqueAt([0, 'note']), true);
+  assert.equal(p.isOpaqueAt([1, 'config', 'upstream']), false);
+  assert.equal(p.isOpaqueAt([2, 'config', 'upstream']), true);
+  assert.equal(p.isOpaqueAt([2, 'config']), false);
+  assert.equal(p.isOpaqueAt(['2', 'config', 'upstream']), false);
+  const json = parsePatch('[{"id":"relay","config":{"upstream":"https://example.test"}}]');
+  assert.equal(json.opaque, false);
+  assert.equal(json.isOpaqueAt([0, 'config', 'upstream']), false);
+});
+
 test('registry insertion and flow role addition', () => {
   const source = '- id: llm-pi-ai\n  config: {providers: {cliproxy: {models: []}}}\n- id: oh-my-dsh-slim\n  config: {roles: {fixer: {provider: cliproxy, model: fallback-fixer}}}\n';
   const p = parsePatch(source), next = structuredClone(p.rows);
