@@ -187,7 +187,8 @@
           "subagent_councillor_gamma",
           "subagent_council"
         ],
-        "mcps": []
+        "mcps": [],
+        "sandboxGrants": ["coresim-device-data"]
       },
       "observer": {
         "enabled": false,

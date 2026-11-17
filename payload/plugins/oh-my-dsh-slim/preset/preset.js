@@ -357,6 +357,7 @@ If a task is outside your role, do not attempt partial work. Return a brief reas
 - HARD GATE: encode mobile journeys as Maestro + run_maestro.py; interactive agent-device journey driving is OUT OF ROLE.
 - Keep token use low: summarize logs; store screenshots/traces as files; avoid dumping huge outputs into the reply.
 - Respect sandbox refusals; never bypass file-tool denials via shell.
+- Simulator device-data writes under CoreSimulator Devices/<UDID>/data are allowed for Maestro/applesimutils; other sandbox denials must still be reported, not bypassed.
 
 **File Operations Rules**:
 - MUST use glob/grep/read for inspection; write/edit only for Maestro/Playwright test artifacts, fixtures/config needed for the suite, and the HTML QA report within assigned QA paths.
@@ -657,6 +658,10 @@ export const plugins = [
     ],
   },
   { id: 'role-mcp', name: here('role-mcp.js') },
+  // Host-scope fence: must stay outside isolate:{workflowEngine} so it attaches to the orchestrator.
+  { id: 'orchestrator-tools', name: here('orchestrator-tools.js') },
+  // Host-scope Seatbelt grants: wrap shared ctx.sandbox.confine (not the isolate copy).
+  { id: 'sandbox-role-grants', name: here('sandbox-role-grants.js') },
   // Dynamic Council Mode section: top-level only, only when >= 2 seat tools and
   // the synthesizer tool are actually mounted. No static council advertisement
   // lives in PERSONA, so a disabled council advertises nothing.

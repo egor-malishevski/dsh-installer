@@ -289,6 +289,9 @@ function validateOrchestrator(orchestrator) {
   if (orchestrator?.mcps !== undefined && (!Array.isArray(orchestrator.mcps) || orchestrator.mcps.length > 0)) {
     throw new Error('oh-my-dsh-slim: orchestrator.mcps is unsupported; configure MCPs through the host');
   }
+  if (orchestrator?.sandboxGrants !== undefined) {
+    throw new Error('oh-my-dsh-slim: orchestrator.sandboxGrants is unsupported; only specialist roles may declare sandbox grants');
+  }
 }
 
 function validateRole(roleId, role, servers) {
@@ -337,6 +340,22 @@ function validateRole(roleId, role, servers) {
     // author (and it can never abort a strict-interpolation host turn).
     if (role.personaAppend.includes('{{')) {
       throw new Error('oh-my-dsh-slim: ' + roleId + '.personaAppend must not contain {{...}}: role persona text is rendered literally');
+    }
+  }
+  if (role.sandboxGrants !== undefined) {
+    if (!Array.isArray(role.sandboxGrants) || role.sandboxGrants.some((name) => typeof name !== 'string')) {
+      throw new Error('oh-my-dsh-slim: ' + roleId + '.sandboxGrants must be an array of known grant name strings');
+    }
+    // Named grants only — keep in sync with KNOWN_GRANTS in sandbox-role-grants.js.
+    const known = new Set(['coresim-device-data']);
+    for (const grantName of role.sandboxGrants) {
+      if (!known.has(grantName)) {
+        throw new Error('oh-my-dsh-slim: ' + roleId + '.sandboxGrants contains unknown grant "' + grantName + '"');
+      }
+    }
+    // Orchestrator is validated separately; council seats/synthesizer stay read-only.
+    if (isCouncilRoleId(roleId)) {
+      throw new Error('oh-my-dsh-slim: ' + roleId + '.sandboxGrants is not supported for council roles');
     }
   }
 }
