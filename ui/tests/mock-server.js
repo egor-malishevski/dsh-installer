@@ -10,7 +10,7 @@ const path = require('node:path');
 const UI_DIR = path.join(__dirname, '..');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
 
-const MCP_IDS = ['obscura', 'bitbucket', 'gitlab', 'kibana', 'jira', 'confluence', 'sequential-thinking', 'memory', 'google-sheets'];
+const MCP_IDS = ['bitbucket', 'gitlab', 'kibana', 'jira', 'confluence', 'google-sheets', 'figma'];
 const FIELDS = {
   bitbucket: [
     { key: 'url', label: 'Адрес Bitbucket', secret: false, required: true, placeholder: 'https://git.example.test' },
@@ -41,7 +41,7 @@ function defaults(o) {
     },
     mcps: MCP_IDS.map((id) => ({
       id, label: id === 'gitlab' ? 'GitLab' : id, description: id === 'gitlab' ? 'Alternative to Bitbucket. Use a token with read permissions as described in the server documentation.' : 'Описание ' + id, fields: FIELDS[id] || [],
-      requires: id === 'kibana' || id === 'jira' ? [{ id: 'uvx' }] : id === 'obscura' ? [{ id: 'obscura-bin', label: 'Obscura', instructions: ['Установите совместимый бинарник вручную'] }] : [],
+      requires: id === 'kibana' || id === 'jira' ? [{ id: 'uvx' }] : [],
     })),
   };
 }

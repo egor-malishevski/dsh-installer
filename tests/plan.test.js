@@ -65,6 +65,6 @@ test('rejects relative home and blocks missing selected executable', async () =>
   const config = { apiUrl: 'https://example.org', apiKey: 'key', mcps: [], roles };
   await assert.rejects(buildInstallPlan(config, { targetHome: 'relative' }));
   await assert.rejects(buildInstallPlan(config, { targetHome: '/test' }));
-  const plan = await buildInstallPlan({ ...config, mcps: [{ id: 'memory', values: {} }] }, { targetHome: '/test', relayPort: 19123 });
+  const plan = await buildInstallPlan({ ...config, mcps: [{ id: 'figma', values: { apiKey: 'x' } }] }, { targetHome: '/test', relayPort: 19123 });
   assert.ok(plan.requirements.some(r => r.startsWith('BLOCKER:')));
 });

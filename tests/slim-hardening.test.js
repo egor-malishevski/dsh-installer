@@ -57,5 +57,6 @@ test('file policy, bounded QA and targeted research guidance ship in preset', ()
   assert.doesNotMatch(source, /Shell is acceptable for bulk or mechanical/);
   assert.doesNotMatch(source, /Prefer dedicated file tools/);
   assert.match(source, /validation-only/i);
-  assert.match(source, /Context7/);
+  assert.match(source, /web_search/);
+  assert.doesNotMatch(source, /Context7|mcp__context7__/);
 });

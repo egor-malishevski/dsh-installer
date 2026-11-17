@@ -293,10 +293,9 @@ Both named legacy configurations and compact role overrides remain accepted:
   "preset": "my-dsh-normal",
   "roles": {
     "oracle": { "provider": "deepseek-official", "model": "deepseek-v4-pro", "effort": "max" },
-    "librarian": { "mcps": ["context7", "gh_grep"] }
+    "librarian": { "mcps": ["gh_grep"] }
   },
   "mcpServers": {
-    "context7": { "transport": "streamable-http", "url": "https://mcp.context7.com/mcp" },
     "gh_grep": { "transport": "streamable-http", "url": "https://mcp.grep.app" }
   }
 }
@@ -322,7 +321,7 @@ Both named legacy configurations and compact role overrides remain accepted:
 
 The native role MCP row mounts the host's own **`@deepseek-ai/dsh-mcp-client`** in the exact
 role Agent context. Each role's `mcps` list selects entries from `mcpServers`; shipped defaults
-select context7 and gh_grep for librarian. These are real scoped native client mounts, **not
+select gh_grep for librarian when configured. These are real scoped native client mounts, **not
 merely persona hints or declarations**. The official client owns transports, tools, resources,
 prompts and reconnection. The preset owns scope selection, readiness and disposal.
 
@@ -335,8 +334,8 @@ authentication and pricing are not guaranteed.
 
 **MCP trust boundary:** Agent-local MCP registrations are exempt from the inherited `toolFilter`.
 The read-only role policy restricts inherited built-in tools; it does **not** automatically make
-arbitrary configured MCP servers read-only. The approved shipped context7/gh_grep defaults are
-research tools. Trust the server and inspect its tools before adding mutation-capable MCPs to a
+arbitrary configured MCP servers read-only. The approved shipped gh_grep default is a
+research tool. Trust the server and inspect its tools before adding mutation-capable MCPs to a
 read-only role; do not treat the role label as universal protection against remote side effects.
 
 ## Validation and known boundaries
@@ -371,7 +370,7 @@ from the installed ASAR, with an isolated `DSH_HOME`, booted dsh-base, the nativ
 companion and preset. The role roster and full-composition `registry.resolve` were healthy, with
 no broken rows. No desktop user installation was changed and no LLM, provider or MCP network
 requests were made. This validates package loading and native host composition, not real-provider
-E2E or remote context7/gh_grep tools. Provider routing, model responses and live MCP transport/tool
+E2E or remote gh_grep tools. Provider routing, model responses and live MCP transport/tool
 calls still require a later E2E run with credentials, network access and an explicitly
 installed/restarted target profile.
 

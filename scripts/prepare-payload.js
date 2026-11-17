@@ -45,8 +45,8 @@ try {
   rmSync(join(integrations, 'lib/web-search-account.js'), { force: true })
   const editorPath = join(integrations, 'lib/editor.js')
   const editor = readFileSync(editorPath, 'utf8')
-  const sourceServers = "const SERVERS = new Set(['mcp-obscura', 'mcp-bitbucket', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-sequential-thinking', 'mcp-memory', 'mcp-google-sheets', 'mcp-figma']);"
-  const installerServers = sourceServers.replace("'mcp-bitbucket',", "'mcp-bitbucket', 'mcp-gitlab',").replace("'mcp-figma']", "'mcp-figma', 'mcp-context7']")
+  const sourceServers = "const SERVERS = new Set(['mcp-bitbucket', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-google-sheets', 'mcp-figma']);"
+  const installerServers = sourceServers.replace("'mcp-bitbucket',", "'mcp-bitbucket', 'mcp-gitlab',")
   const declarations = editor.match(/^const SERVERS\s*=.*$/gm) || []
   if (declarations.length !== 1 || ![sourceServers, installerServers].includes(declarations[0])) throw new Error('Unexpected integrations editor server allowlist')
   if (declarations[0] === sourceServers) writeFileSync(editorPath, editor.replace(sourceServers, installerServers))

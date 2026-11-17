@@ -28,9 +28,7 @@ test('installed profile resolves and parses in the packaged host without activat
   const config = { apiUrl: 'https://example.org/v1', apiKey: 'fake-relay-secret', roles: structuredClone(roles), mcps: [
     { id: 'gitlab', values: { url: 'https://git.example.org', token: 'fake-gitlab-secret' } },
     { id: 'jira', values: { url: 'https://jira.example.org', token: 'fake-jira-secret' } },
-    { id: 'memory', values: {} },
     { id: 'figma', values: { apiKey: 'fake-figma-secret' } },
-    { id: 'context7', values: {} },
   ] };
   const plan = await buildInstallPlan(config, { targetHome: home, relayPort: 19123, runtimePaths: { npx: '/usr/bin/true', uvx: '/usr/bin/true', nodeVersion: '24.0.0', npxPath: '/usr/bin:/bin' } });
   assert.ok(!plan.requirements.some(r => r.startsWith('BLOCKER:')));
@@ -51,7 +49,7 @@ test('installed profile resolves and parses in the packaged host without activat
   const patches = boot.readProfilePatches('test', { dir, home: dshHome, patchPath: path.join(dir, 'cordis.patch.yml'), installAnchor: anchor, overlays: [] }, profile);
   const integration = profile.layers.find(layer => layer.packageName === 'dsh-integrations');
   const rows = integration.patches.flatMap(p => p.insert || []);
-  assert.deepEqual(rows.filter(r => r.id.startsWith('mcp-')).map(r => r.id), ['mcp-gitlab', 'mcp-jira', 'mcp-memory', 'mcp-figma', 'mcp-context7']);
+  assert.deepEqual(rows.filter(r => r.id.startsWith('mcp-')).map(r => r.id), ['mcp-gitlab', 'mcp-jira', 'mcp-figma']);
   assert.ok(!rows.some(r => r.id === 'web-search-account' || r.id === 'web-search-exa-parallel'));
   const composed = boot.composeEntries([patches]);
   assert.equal(composed.filter(r => r.id === 'web-search-exa-parallel').length, 1);
@@ -69,8 +67,8 @@ test('installed profile resolves and parses in the packaged host without activat
     oracle: { provider: 'cliproxy', model: 'gpt-6.1-sol', effort: 'high', sharedMcpTools: [...gitlabGrants.oracle, 'mcp__jira__jira_get_issue', 'mcp__jira__jira_search'] },
     designer: { provider: 'cliproxy', model: 'claude-sonnet-5-5', effort: 'medium', sharedMcpTools: ['mcp__jira__jira_get_issue', 'mcp__jira__jira_search', 'mcp__figma__get_figma_data'] },
     fixer: { provider: 'cliproxy', model: 'claude-sonnet-5-5', effort: 'medium', sharedMcpTools: [...gitlabGrants.fixer, 'mcp__jira__jira_get_issue', 'mcp__jira__jira_search'] },
-    explorer: { provider: 'cliproxy', model: 'claude-haiku-5-5', effort: 'low', sharedMcpTools: ['mcp__context7__resolve-library-id', 'mcp__context7__query-docs'] },
-    librarian: { provider: 'cliproxy', model: 'grok-4.7', sharedMcpTools: [...gitlabGrants.librarian, 'mcp__context7__resolve-library-id', 'mcp__context7__query-docs'] },
+    explorer: { provider: 'cliproxy', model: 'claude-haiku-5-5', effort: 'low' },
+    librarian: { provider: 'cliproxy', model: 'grok-4.7', sharedMcpTools: [...gitlabGrants.librarian] },
   });
   const patchPath = path.join(integrationDir, 'cordis.patch.yml');
   const publicText = (await readFile(patchPath, 'utf8')) + (await readFile(path.join(dir, 'cordis.patch.yml'), 'utf8'));
@@ -87,7 +85,7 @@ test('installed profile resolves and parses in the packaged host without activat
   }
   const { createEditor } = await import(url(path.join(integrationDir, 'lib/editor.js')));
   const editor = createEditor({ path: patchPath, recoveryDir: path.join(home, 'recovery'), yaml, atomic, getHmr: () => undefined, isActive: () => false });
-  assert.deepEqual(await editor.statusRows(), [{ id: 'mcp-gitlab', serverName: 'gitlab' }, { id: 'mcp-jira', serverName: 'jira' }, { id: 'mcp-memory', serverName: 'memory' }, { id: 'mcp-figma', serverName: 'figma' }, { id: 'mcp-context7', serverName: 'context7' }]);
+  assert.deepEqual(await editor.statusRows(), [{ id: 'mcp-gitlab', serverName: 'gitlab' }, { id: 'mcp-jira', serverName: 'jira' }, { id: 'mcp-figma', serverName: 'figma' }]);
   const description = await editor.describe();
   assert.equal(description.ok, true);
   assert.equal(description.canSave, false);

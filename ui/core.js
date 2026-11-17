@@ -127,20 +127,14 @@
     [/^Token$/i, 'Токен'],
     [/^Username$/i, 'Имя пользователя'],
     [/^Password$/i, 'Пароль'],
-    [/^Binary path$/i, 'Путь к бинарнику'],
     [/^OAuth credentials JSON path$/i, 'Путь к JSON с OAuth-данными'],
     [/^OAuth token JSON path$/i, 'Путь к JSON с OAuth-токеном'],
     [/^Alternative to Bitbucket\. Use a token with read permissions as described in the server documentation\.?$/i, 'Альтернатива Bitbucket. Используйте токен с правами на чтение, как описано в документации сервера.'],
     [/^Connect to (Bitbucket|Kibana|Jira|Confluence)\.?$/i, 'Подключение к $1.'],
-    [/^Requires a separately installed compatible binary\.?$/i, 'Нужен отдельно установленный совместимый бинарник.'],
-    [/^Create a new local memory store\.?$/i, 'Создаёт новое локальное хранилище памяти.'],
     [/^Connect using Google OAuth credentials and a token file\.?$/i, 'Подключение через OAuth-данные Google и файл токена.'],
-    [/^Local reasoning tools\.?$/i, 'Локальные инструменты рассуждения.'],
-    [/^Sequential thinking$/i, 'Sequential thinking'],
     [/^API key$/i, 'API-ключ'],
     [/^Figma personal access token$/i, 'Персональный токен Figma'],
     [/^Read Figma designs with a personal access token\.?$/i, 'Чтение макетов Figma по персональному токену.'],
-    [/^Up-to-date library documentation\. The API key is optional and raises rate limits\.?$/i, 'Актуальная документация библиотек. API-ключ необязателен, он повышает лимиты запросов.'],
   ];
   function translateCatalog(text) {
     const t = String(text == null ? '' : text).trim();

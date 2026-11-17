@@ -203,7 +203,7 @@ test('installBlockers: окружение из bootstrap с необязател
 test('normalizePreflight: blockers при ok:true, префиксы и секреты', () => {
   const p = C.normalizePreflight({
     ok: true,
-    blockers: ['BLOCKER: uvx is required for jira.', 'BLOCKER: Node.js 24 or newer is required for memory. sk-secret-1'],
+    blockers: ['BLOCKER: uvx is required for jira.', 'BLOCKER: uvx is required for confluence. sk-secret-1'],
     warnings: ['WARNING: gitlab may require network access on first launch.'],
     preview: { fileCount: 7, relayPort: 1 },
   }, ['sk-secret-1']);

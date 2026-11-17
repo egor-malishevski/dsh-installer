@@ -33,17 +33,19 @@ test('rejects invalid MCP fields, URLs, paths and duplicate selections', () => {
   for (const entry of [
     selection('google-sheets', { credentialsPath: '/ok', tokenPath: 42 }),
     selection('google-sheets', { credentialsPath: '~/file' }),
-    selection('obscura', { binaryPath: 'relative' }),
+    selection('obscura', { binaryPath: '/bin/obscura' }),
+    selection('memory', {}),
+    selection('sequential-thinking', {}),
     selection('jira', { url: 'http://example.com', token: 'x' }),
     selection('jira', { url: 'https://user:pass@example.com', token: 'x' }),
     selection('jira', { url: 'https://example.com/?q=x', token: 'x' }),
     selection('gitlab', { url: 'https://example.com/path', token: 'x' }),
-    selection('memory', JSON.parse('{"__proto__":"bad"}')),
+    selection('figma', JSON.parse('{"__proto__":"bad"}')),
     selection('jira', { url: 'https://example.com', token: 'x\nheader' }),
   ]) {
     const c = config(); c.mcps = [entry]; assert.throws(() => validateConfig(c));
   }
-  const c = config(); c.mcps = [selection('memory', {}), selection('memory', {})];
+  const c = config(); c.mcps = [selection('figma', { apiKey: 'x' }), selection('figma', { apiKey: 'y' })];
   assert.throws(() => validateConfig(c));
 });
 

@@ -28,7 +28,8 @@ test('local API requires capability and same origin, validates without installin
   assert.equal(hostStatus, 403);
   assert.equal((await fetch(base + '/api/bootstrap', { method: 'OPTIONS', headers: auth })).status, 403);
   const bootstrap = await (await fetch(base + '/api/bootstrap', { headers: auth })).json();
-  assert.equal(bootstrap.defaults.mcps.length, 11);
+  assert.equal(bootstrap.defaults.mcps.length, 7);
+  assert.ok(!bootstrap.defaults.mcps.some(mcp => ['context7', 'obscura', 'memory', 'sequential-thinking'].includes(mcp.id)));
   assert.ok(bootstrap.defaults.mcps.some(mcp => mcp.id === 'gitlab'));
   const config = { apiUrl: 'https://example.org', apiKey: 'private', mcps: [], roles };
   const options = { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ config }) };
@@ -42,16 +43,16 @@ test('local API requires capability and same origin, validates without installin
 });
 
 
-test('repeated preflight reports selected MCP Node requirement', async t => {
+test('install rejects removed MCP catalog ids', async t => {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'dsh-server-')));
-  let calls = 0;
-  const instance = createServer({ home, discoveryModelsFn, inspectEnvironmentFn: async () => ({ ok: true, blockers: [], checks: [], runtimePaths: { npx: process.execPath, npxPath: '/usr/bin', nodeVersion: ++calls === 1 ? 'v24.0.0' : 'v20.0.0' } }), assertStoppedFn: async () => ({ ok: true }) });
+  const instance = createServer({ home, discoveryModelsFn, inspectEnvironmentFn: async () => ({ ok: true, blockers: [], checks: [], runtimePaths: { npx: process.execPath, npxPath: '/usr/bin', nodeVersion: 'v24.0.0' } }), assertStoppedFn: async () => ({ ok: true }) });
   await new Promise(resolve => instance.server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => instance.server.close(resolve)); await rm(home, { recursive: true, force: true }); });
-  const config = { apiUrl: 'https://example.org', apiKey: 'private', mcps: [{ id: 'memory', values: {} }], roles };
-  const response = await fetch(instance.origin + '/api/install', { method: 'POST', headers: { 'X-DSH-Setup-Token': instance.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ config }) });
-  assert.equal(response.status, 409);
-  assert.match((await response.json()).blockers.join(' '), /Node.js 24/);
+  for (const id of ['memory', 'obscura', 'sequential-thinking']) {
+    const config = { apiUrl: 'https://example.org', apiKey: 'private', mcps: [{ id, values: id === 'obscura' ? { binaryPath: '/bin/true' } : {} }], roles };
+    const response = await fetch(instance.origin + '/api/validate', { method: 'POST', headers: { 'X-DSH-Setup-Token': instance.token, 'Content-Type': 'application/json' }, body: JSON.stringify({ config }) });
+    assert.equal(response.status, 400, id);
+  }
 });
 
 test('occupied preview port is replaced consistently in installed files and response', async t => {

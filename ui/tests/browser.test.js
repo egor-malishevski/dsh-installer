@@ -93,16 +93,14 @@ test('мастер: шаги, клавиатура, секреты не попа
     assert.match(vtext, /Запрос к модели не выполнялся/);
     await page.click('#btn-next');
 
-    // Шаг 3: по умолчанию ничего не выбрано, все 8 на месте
+    // Шаг 3: по умолчанию ничего не выбрано, каталог без obscura/memory/sequential-thinking
     await page.waitForSelector('#mcp-counter');
-    assert.equal(await page.locator('.mcp__check').count(), 9);
+    assert.equal(await page.locator('.mcp__check').count(), 7);
     assert.equal(await page.locator('.mcp__check:checked').count(), 0);
+    assert.equal(await page.locator('#mcp-obscura').count(), 0);
+    assert.equal(await page.locator('#mcp-memory').count(), 0);
+    assert.equal(await page.locator('#mcp-sequential-thinking').count(), 0);
     // Выбираем bitbucket с обязательными полями
-    await page.check('#mcp-obscura');
-    assert.match(await page.textContent('#mcp-reqs-obscura'), /проверьте вручную/);
-    assert.match(await page.textContent('#mcp-reqs-obscura'), /Установите совместимый бинарник/);
-    await page.fill('#mcp-obscura-binaryPath', '/tmp/x').catch(() => {});
-    await page.uncheck('#mcp-obscura');
     await page.check('#mcp-bitbucket');
     await page.click('#btn-next');
     assert.ok(await page.locator('#errsum').isVisible(), 'обязательные поля MCP проверяются');
