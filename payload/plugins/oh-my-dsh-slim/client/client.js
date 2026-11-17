@@ -587,6 +587,8 @@ window.__ModuleLoader__.load({
       councilSameModel: '建议为议员选择不同模型：相同模型的“议会”只是重复采样。',
       councilInheritedModelsDistinct: '部分席位跟随会话模型。它们的席位提示不同，所以角度不同，但同一模型的采样仍然相互关联。',
       councilSameModelDistinct: '各席位提示词不同、视角有别；但相同模型的样本仍高度相关，要真正多模型评审请为席位选择不同模型。',
+      agentRules: '代理附加规则',
+      agentRulesHint: '追加到内置角色指令，不授予工具或 MCP 权限。最多 8000 字符，不可包含 {{...}}。新会话生效。',
       personaAppend: '席位提示词（追加）',
       personaAppendHint: '留空：由主模型按任务给各席分配视角；填写后该视角固定生效。例如：特别关注并发与失败恢复。',
       councilPrompt: '合成提示词（追加）',
@@ -790,6 +792,8 @@ window.__ModuleLoader__.load({
       councilSameModel: 'Give the seats different models: identical models make the council a repeat sample.',
       councilInheritedModelsDistinct: 'Some seats follow the session model. Their seat prompts differ, so the angles do, but samples from one model stay correlated.',
       councilSameModelDistinct: 'The seat prompts differ, so the angles do; samples from one model still stay correlated. Pick different models for a true multi-model review.',
+      agentRules: 'Additional agent rules',
+      agentRulesHint: 'Appended to the built-in role instructions; does not grant tools or MCP access. Up to 8000 characters, without {{...}}. Applies to new sessions.',
       personaAppend: 'Seat prompt (appended)',
       personaAppendHint: 'Empty: the main model assigns each seat a focus per task; a value here fixes the angle. e.g. Focus on concurrency and failure recovery.',
       councilPrompt: 'Synthesis prompt (appended)',
@@ -1805,17 +1809,18 @@ window.__ModuleLoader__.load({
             : (role.maxTokens === undefined || role.maxTokens === '')
               ? React.createElement('span', { style: { fontSize: 11, lineHeight: '16px', color: color.tertiary } }, t('maxTokensEmptyHint'))
               : null,
-          COUNCIL_ROLE_IDS.includes(roleId) ? React.createElement(Field, {
-            label: t(roleId === COUNCIL_ROLE_ID ? 'councilPrompt' : 'personaAppend'),
+          React.createElement(Field, {
+            label: t(roleId === COUNCIL_ROLE_ID ? 'councilPrompt' : COUNCIL_ROLE_IDS.includes(roleId) ? 'personaAppend' : 'agentRules'),
             grow: false,
           },
             React.createElement('textarea', {
               value: role.personaAppend ?? '', rows: 3,
-              placeholder: t(roleId === COUNCIL_ROLE_ID ? 'councilPromptHint' : 'personaAppendHint'), disabled: locked,
+              placeholder: t(roleId === COUNCIL_ROLE_ID ? 'councilPromptHint' : COUNCIL_ROLE_IDS.includes(roleId) ? 'personaAppendHint' : 'agentRulesHint'), disabled: locked,
+              'aria-label': t(COUNCIL_ROLE_IDS.includes(roleId) ? 'personaAppend' : 'agentRules'),
               onChange: (e) => onChange(roleId, { personaAppend: e.target.value === '' ? undefined : e.target.value }),
               // Styled by `.omds-textarea` (border-box, multi-line height).
               className: 'omds-textarea',
-            })) : null,
+            })),
           (invalid.maxTokens || invalid.temperature || invalid.personaAppend) ? React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' } },
             invalid.personaAppend ? t('personaAppendInvalid') : invalid.maxTokens ? t('invalidMaxTokens') : t('invalidTemperature')) : null,
           FALLBACK_ROLE_IDS.includes(roleId)
