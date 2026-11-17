@@ -87,6 +87,12 @@ export const ROLE_TABLE = Object.freeze({
     title: 'librarian',
     description: "External documentation and library research. Use for official docs lookup, GitHub examples, and understanding library internals.",
   }),
+  tester: Object.freeze({
+    roleId: 'tester',
+    toolName: 'subagent_tester',
+    title: 'tester',
+    description: "QA specialist for mobile and web. Writes durable Maestro/Playwright tests, runs them via CLI, uses agent-device only for mobile scout/debug, and returns an HTML report with screenshots, failures, and reproduction steps.",
+  }),
   observer: Object.freeze({
     roleId: 'observer',
     toolName: 'subagent_observer',

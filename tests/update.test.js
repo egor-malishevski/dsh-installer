@@ -321,7 +321,7 @@ test('payload change after preview is stale; incompatible app cannot apply; user
   assert.ok(env.conflicts.includes('APP_INCOMPATIBLE')); assert.equal(env.canApply, false);
   // Missing registry row is a visible, separate action detail.
   const detail = p.actions.find(a => a.reason === 'PROFILE_PATCH_MERGE');
-  assert.deepEqual(detail.details, ['PRESET_REGISTRY_ADDED']);
+  assert.deepEqual(detail.details, ['PRESET_REGISTRY_ADDED', 'TESTER_ROLE_ADDED']);
   // Empty model list is seeded; the seed is visible as a detail.
   const empty = await fixture(t, { patch: [oldPatch[0], { id: 'llm-pi-ai', config: { providers: { cliproxy: { models: [] } } } }, oldPatch[2]] });
   const e = await updateProfile({ home: empty, payloadRoot, ...base });

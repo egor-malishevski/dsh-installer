@@ -8,7 +8,8 @@ import { spawnSync } from 'node:child_process'
 
 const payload = resolve(dirname(fileURLToPath(import.meta.url)), '../payload')
 const script = resolve(dirname(fileURLToPath(import.meta.url)), '../scripts/prepare-payload.js')
-const servers = "const SERVERS = new Set(['mcp-bitbucket', 'mcp-gitlab', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-google-sheets', 'mcp-figma']);"
+const upstreamServers = "const SERVERS = new Set(['mcp-bitbucket', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-google-sheets', 'mcp-figma']);"
+const servers = "const SERVERS = new Set(['mcp-bitbucket', 'mcp-gitlab', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-google-sheets', 'mcp-figma', 'mcp-agent-device']);"
 const clients = "const MODULES = new Set(['@deepseek-ai/dsh-mcp-client', 'dsh-integrations/mcp-client']);"
 function files(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -42,6 +43,8 @@ test('preparation adds GitLab only to the expected editor allowlist', () => {
     mkdirSync(join(temp, 'scripts'))
     writeFileSync(join(temp, 'package.json'), '{"type":"module"}')
     cpSync(script, join(temp, 'scripts/prepare-payload.js'))
+    const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+    cpSync(join(repoRoot, 'assets'), join(temp, 'assets'), { recursive: true })
     const integrations = join(temp, 'integrations')
     const slim = join(temp, 'slim')
     cpSync(join(payload, 'bundles/dsh-integrations'), integrations, { recursive: true })
@@ -56,10 +59,11 @@ test('preparation adds GitLab only to the expected editor allowlist', () => {
     const editorPath = join(integrations, 'lib/editor.js')
     const original = readFileSync(editorPath, 'utf8')
     const run = () => spawnSync(process.execPath, [join(temp, 'scripts/prepare-payload.js'), '--integrations', integrations, '--slim', slim, '--relay', relay], { encoding: 'utf8' })
-    writeFileSync(editorPath, original.replace(servers, servers.replace("'mcp-bitbucket', 'mcp-gitlab',", "'mcp-bitbucket',")))
+    writeFileSync(editorPath, original.replace(servers, upstreamServers))
     let result = run()
     assert.equal(result.status, 0, result.stderr)
     assert.equal(readFileSync(join(temp, 'payload/bundles/dsh-integrations/lib/editor.js'), 'utf8'), original)
+    assert.ok(existsSync(join(temp, 'payload/bundles/dsh-integrations/lib/agent-device-mcp-adapter.mjs')))
     assert.equal(readFileSync(join(temp, 'payload/plugins/dsh-web-search-exa-parallel/lib/index.js'), 'utf8'), readFileSync(join(payload, 'plugins/dsh-web-search-exa-parallel/lib/index.js'), 'utf8'))
     assert.equal(JSON.parse(readFileSync(join(temp, 'payload/bundles/dsh-integrations/package.json'), 'utf8')).exports['./web-search-account'], undefined)
     const preparedRelay = readFileSync(join(temp, 'payload/plugins/zstd-render/index.js'), 'utf8')

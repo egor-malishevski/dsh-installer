@@ -141,3 +141,35 @@ test('HTTP /api/update forwards migrateNativeFallbacks and rejects non-boolean',
   const stale = await post({ dryRun: false, planHash: preview.planHash, acknowledgeManagedFiles: true });
   assert.equal((await stale.json()).code, 'STALE_PLAN');
 });
+
+test('update backfills missing tester role and merges scout tools non-destructively', async t => {
+  const home = await fixture(t);
+  const preview = await updateProfile({ home, ...base });
+  assert.ok(preview.actions.some(a => (a.details || []).includes('TESTER_ROLE_ADDED')));
+  const done = await applyWith(home, {});
+  assert.equal(done.ok, true);
+  const slim = (await readPatch(home)).find(r => r.id === 'oh-my-dsh-slim');
+  const tester = slim.config.roles.tester;
+  assert.equal(tester.provider, 'cliproxy');
+  assert.equal(tester.model, 'claude-sonnet-5-5');
+  assert.equal(tester.effort, 'medium');
+  for (const tool of [
+    'mcp__jira__jira_get_issue',
+    'mcp__confluence__confluence_search',
+    'mcp__confluence__confluence_get_page',
+    'mcp__agent-device__devices',
+    'mcp__agent-device__find',
+  ]) assert.ok(tester.sharedMcpTools.includes(tool), tool);
+  // Existing custom grants on other roles stay verbatim.
+  for (const r of roleNames) assert.deepEqual(slim.config.roles[r].sharedMcpTools, ['mcp__x__y']);
+  // Second pass merges without wiping a custom scout grant already present.
+  const rows = await readPatch(home);
+  rows.find(r => r.id === 'oh-my-dsh-slim').config.roles.tester.sharedMcpTools = ['mcp__custom__keep', 'mcp__agent-device__devices'];
+  await writeFile(join(home, '.dsh/profiles/desktop/cordis.patch.yml'), JSON.stringify(rows));
+  const again = await applyWith(home, {});
+  assert.equal(again.ok, true);
+  const tester2 = (await readPatch(home)).find(r => r.id === 'oh-my-dsh-slim').config.roles.tester;
+  assert.ok(tester2.sharedMcpTools.includes('mcp__custom__keep'));
+  assert.ok(tester2.sharedMcpTools.includes('mcp__agent-device__boot'));
+  assert.equal(tester2.sharedMcpTools.filter(x => x === 'mcp__agent-device__devices').length, 1);
+});

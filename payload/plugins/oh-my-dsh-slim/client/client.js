@@ -44,7 +44,7 @@ window.__ModuleLoader__.load({
     // client-card.test.mjs compare it with package.json so a release bump
     // cannot silently leave the header stale.
     const VERSION = '0.8.7-native.1';
-    const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer'];
+    const UPSTREAM_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'tester', 'observer'];
     const COUNCILLOR_ROLE_IDS = ['councillor-alpha', 'councillor-beta', 'councillor-gamma'];
     // Council's synthesizer has no user-facing enable switch: it is active
     // exactly when at least two councillors are. Never persist its enabled bit.
@@ -221,7 +221,7 @@ window.__ModuleLoader__.load({
       'create_goal', 'get_goal', 'update_goal', 'exit_plan_mode',
       'list_agents', 'interrupt_agent', 'send_message', 'subagent_result',
       'subagent_oracle', 'subagent_designer', 'subagent_fixer', 'subagent_explorer',
-      'subagent_librarian', 'subagent_observer', 'subagent_councillor_alpha',
+      'subagent_librarian', 'subagent_tester', 'subagent_observer', 'subagent_councillor_alpha',
       'subagent_councillor_beta', 'subagent_councillor_gamma', 'subagent_council',
     ];
     // Councillor seats carry a read-only ceiling; the synthesizer is tool-less.
@@ -314,10 +314,10 @@ window.__ModuleLoader__.load({
     const sharedMcpInvalid = (role) => (role?.sharedMcpTools ?? []).filter((name) => !isMcpToolNameUi(name));
 
     // Backup routes (`fallbacks`): an ordered list of at most three
-    // provider/model routes, each with an optional effort. Only the five
+    // provider/model routes, each with an optional effort. Only the six
     // specialists carry them — never the observer, the council, or the main
     // model, which are owned elsewhere. A fallback names a catalog route, not an alias.
-    const FALLBACK_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian'];
+    const FALLBACK_ROLE_IDS = ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'tester'];
     const MAX_FALLBACKS = 3;
 
     /**

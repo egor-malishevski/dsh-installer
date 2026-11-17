@@ -55,8 +55,45 @@ test('missing runtime blocks corresponding rows and grants', () => {
 });
 test('filters grants and rejects unsafe URLs and paths', () => {
   const result = generateMcps({ mcps: [selections[3]] }, options);
-  assert.deepEqual(Object.keys(result.sharedMcpTools).sort(), ['designer', 'fixer', 'oracle']);
+  assert.deepEqual(Object.keys(result.sharedMcpTools).sort(), ['designer', 'fixer', 'oracle', 'tester']);
   assert.throws(() => generateMcps({ mcps: [{ id: 'jira', values: { url: 'http://example.com', token: 'x' } }] }, options));
   assert.throws(() => generateMcps({ mcps: [{ id: 'google-sheets', values: { credentialsPath: 'relative' } }] }, options));
   assert.throws(() => generateMcps({ mcps: [{ id: 'figma', values: {} }] }, options));
+});
+
+test('agent-device is optional: scout grants without CLI, server row when CLI provided', () => {
+  const missing = generateMcps({ mcps: [{ id: 'agent-device', values: {} }] }, { targetHome: '/home/a', agentDeviceCli: null });
+  assert.equal(missing.rows.length, 0);
+  assert.ok(missing.requirements.some(r => r.includes('agent-device CLI not found')));
+  assert.deepEqual(missing.sharedMcpTools.tester, [
+    'mcp__agent-device__devices',
+    'mcp__agent-device__boot',
+    'mcp__agent-device__open',
+    'mcp__agent-device__snapshot',
+    'mcp__agent-device__screenshot',
+    'mcp__agent-device__logs',
+    'mcp__agent-device__appstate',
+    'mcp__agent-device__find',
+  ]);
+  const cli = '/usr/local/lib/node_modules/agent-device/bin/agent-device.mjs';
+  const present = generateMcps({ mcps: [{ id: 'agent-device', values: {} }] }, { targetHome: '/home/a', agentDeviceCli: cli, workspaceDir: '/home/a/ws' });
+  assert.equal(present.rows.length, 1);
+  assert.equal(present.rows[0].id, 'mcp-agent-device');
+  assert.equal(present.rows[0].config.serverName, 'agent-device');
+  assert.deepEqual(present.rows[0].config.args.slice(-2), [cli, 'mcp']);
+  assert.equal(present.rows[0].config.env.AGENT_DEVICE_STATE_DIR, '/home/a/ws/.agent-device');
+  assert.equal(present.rows[0].config.env.AGENT_DEVICE_NO_UPDATE_NOTIFIER, '1');
+  assert.equal(present.rows[0].config.toolCallTimeoutMs, 300000);
+  assert.ok(!present.rows[0].config.args.includes('/Users/developer/.nvm'));
+  assert.match(present.rows[0].config.args[0], /agent-device-mcp-adapter\.mjs$/);
+});
+
+test('jira/confluence grants include tester subsets', () => {
+  const result = generateMcps({ mcps: [
+    { id: 'jira', values: { url: 'https://jira.example', token: 't' } },
+    { id: 'confluence', values: { url: 'https://conf.example', token: 't' } },
+  ] }, options);
+  assert.deepEqual(result.sharedMcpTools.tester, ['mcp__jira__jira_get_issue', 'mcp__confluence__confluence_search', 'mcp__confluence__confluence_get_page']);
+  assert.ok(!result.sharedMcpTools.tester.includes('mcp__jira__jira_search'));
+  assert.ok(!result.sharedMcpTools.tester.includes('mcp__confluence__confluence_get_page_children'));
 });

@@ -10,7 +10,7 @@ const controls = ['create_goal', 'get_goal', 'update_goal', 'exit_plan_mode', 'l
 
 test('all ordinary roles deny orchestration tools, but retain parent communication and execution', () => {
   const config = loadConfig();
-  for (const role of ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer']) {
+  for (const role of ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'tester', 'observer']) {
     const policy = config.roles[role];
     const filter = effectiveRoleFilter(role, policy);
     for (const name of controls) {
@@ -22,6 +22,10 @@ test('all ordinary roles deny orchestration tools, but retain parent communicati
     if (['oracle', 'explorer', 'librarian', 'observer'].includes(role)) {
       assert.ok(filter.deny.includes('edit'));
       assert.ok(filter.deny.includes('write'));
+    }
+    if (['designer', 'fixer', 'tester'].includes(role)) {
+      assert.ok(!filter.deny.includes('edit'), `${role} is write-capable`);
+      assert.ok(!filter.deny.includes('write'), `${role} is write-capable`);
     }
     const narrowed = effectiveRoleFilter(role, { ...policy, tools: [...controls, 'read', 'send_message'], deny: [...policy.deny, 'read'] });
     assert.ok(narrowed.deny.includes('read'));

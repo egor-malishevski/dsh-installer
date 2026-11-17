@@ -9,7 +9,7 @@
 // test/package.test.mjs pins the two lists together.
 
 /** Specialist roles shipped since the 0.1.x line. */
-export const UPSTREAM_ROLE_IDS = Object.freeze(['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer']);
+export const UPSTREAM_ROLE_IDS = Object.freeze(['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'tester', 'observer']);
 
 /** Council seats. Fixed roster in 0.8.0; dynamic seats are a later plan. */
 export const COUNCILLOR_ROLE_IDS = Object.freeze(['councillor-alpha', 'councillor-beta', 'councillor-gamma']);

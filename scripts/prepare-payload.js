@@ -46,10 +46,15 @@ try {
   const editorPath = join(integrations, 'lib/editor.js')
   const editor = readFileSync(editorPath, 'utf8')
   const sourceServers = "const SERVERS = new Set(['mcp-bitbucket', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-google-sheets', 'mcp-figma']);"
-  const installerServers = sourceServers.replace("'mcp-bitbucket',", "'mcp-bitbucket', 'mcp-gitlab',")
+  const installerServersGitlab = sourceServers.replace("'mcp-bitbucket',", "'mcp-bitbucket', 'mcp-gitlab',")
+  const installerServers = "const SERVERS = new Set(['mcp-bitbucket', 'mcp-gitlab', 'mcp-kibana', 'mcp-jira', 'mcp-confluence', 'mcp-google-sheets', 'mcp-figma', 'mcp-agent-device']);"
   const declarations = editor.match(/^const SERVERS\s*=.*$/gm) || []
-  if (declarations.length !== 1 || ![sourceServers, installerServers].includes(declarations[0])) throw new Error('Unexpected integrations editor server allowlist')
-  if (declarations[0] === sourceServers) writeFileSync(editorPath, editor.replace(sourceServers, installerServers))
+  if (declarations.length !== 1 || ![sourceServers, installerServersGitlab, installerServers].includes(declarations[0])) throw new Error('Unexpected integrations editor server allowlist')
+  if (declarations[0] !== installerServers) writeFileSync(editorPath, editor.replace(declarations[0], installerServers))
+  // Re-inject vendored agent-device MCP adapter so payload refreshes keep it even when upstream integrations omit it.
+  const adapterSrc = join(root, 'assets/integrations-lib/agent-device-mcp-adapter.mjs')
+  if (!existsSync(adapterSrc)) throw new Error('Missing vendored agent-device-mcp-adapter.mjs under assets/integrations-lib/')
+  copy(adapterSrc, join(integrations, 'lib/agent-device-mcp-adapter.mjs'))
   for (const item of ['LICENSE', 'README.md', 'NOTICE', 'NOTICE.md']) copy(join(sources['--integrations'], item), join(integrations, item), false)
   for (const item of ['package.json', 'lib', 'preset', 'client', 'cordis.patch.yml', 'LICENSE']) copy(join(sources['--slim'], item), join(slim, item))
   for (const item of ['README.md', 'NOTICE', 'NOTICE.md']) copy(join(sources['--slim'], item), join(slim, item), false)
@@ -57,9 +62,9 @@ try {
   // Supply the hardened plugin (or this repository's payload) as --slim.
   const slimDefaults = JSON.parse(readFileSync(join(slim, 'preset/defaults.json'), 'utf8'))
   for (const roles of Object.values(slimDefaults.presets ?? {})) {
-    for (const role of ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'observer']) {
+    for (const role of ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'tester', 'observer']) {
       const deny = roles[role]?.deny ?? []
-      for (const tool of ['create_goal', 'get_goal', 'update_goal', 'exit_plan_mode', 'list_agents', 'interrupt_agent', 'subagent_result', 'subagent_fixer', 'subagent_oracle', 'subagent_designer', 'subagent_explorer', 'subagent_librarian', 'subagent_observer', 'subagent_councillor_alpha', 'subagent_councillor_beta', 'subagent_councillor_gamma', 'subagent_council']) {
+      for (const tool of ['create_goal', 'get_goal', 'update_goal', 'exit_plan_mode', 'list_agents', 'interrupt_agent', 'subagent_result', 'subagent_fixer', 'subagent_oracle', 'subagent_designer', 'subagent_explorer', 'subagent_librarian', 'subagent_tester', 'subagent_observer', 'subagent_councillor_alpha', 'subagent_councillor_beta', 'subagent_councillor_gamma', 'subagent_council']) {
         if (!deny.includes(tool)) throw new Error(`Slim hardening missing: ${role}.deny must include ${tool}; use the curated plugin as --slim`)
       }
     }

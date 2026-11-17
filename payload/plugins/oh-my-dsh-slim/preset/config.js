@@ -45,13 +45,13 @@ export function isEffortToken(value) {
 }
 
 /** Specialist roles that may declare `fallbacks` (native request-error failover). */
-export const FALLBACK_ROLE_IDS = Object.freeze(['oracle', 'designer', 'fixer', 'explorer', 'librarian']);
+export const FALLBACK_ROLE_IDS = Object.freeze(['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'tester']);
 /** Upper bound of fallback entries per role. */
 export const MAX_FALLBACKS = 3;
 
 /**
  * Validate `roles.<id>.fallbacks`: an ordered array (<= MAX_FALLBACKS) of
- * { provider, model, effort? }. Only the five specialists accept it; council
+ * { provider, model, effort? }. Only the six specialists accept it; council
  * seats, the synthesizer and observer reject any value.
  * @param roleId - the role being validated.
  * @param role - the merged role document.
@@ -96,6 +96,7 @@ const RUNTIME_DEFAULTS = {
   fixer: { temperature: 0.2 },
   explorer: { temperature: 0.1 },
   librarian: { temperature: 0.1 },
+  tester: { temperature: 0.2 },
   observer: { temperature: 0.1 },
   'councillor-alpha': { temperature: 0.1 },
   'councillor-beta': { temperature: 0.1 },
@@ -110,7 +111,7 @@ const TOOL_NAMES = new Set([
   'create_goal', 'get_goal', 'update_goal', 'exit_plan_mode',
   'list_agents', 'interrupt_agent', 'send_message', 'subagent_result',
   'subagent_oracle', 'subagent_designer', 'subagent_fixer', 'subagent_explorer',
-  'subagent_librarian', 'subagent_observer', 'subagent_councillor_alpha',
+  'subagent_librarian', 'subagent_tester', 'subagent_observer', 'subagent_councillor_alpha',
   'subagent_councillor_beta', 'subagent_councillor_gamma', 'subagent_council',
 ]);
 export function isMcpToolName(name) {

@@ -28,7 +28,7 @@ test('local API requires capability and same origin, validates without installin
   assert.equal(hostStatus, 403);
   assert.equal((await fetch(base + '/api/bootstrap', { method: 'OPTIONS', headers: auth })).status, 403);
   const bootstrap = await (await fetch(base + '/api/bootstrap', { headers: auth })).json();
-  assert.equal(bootstrap.defaults.mcps.length, 7);
+  assert.equal(bootstrap.defaults.mcps.length, 8);
   assert.ok(!bootstrap.defaults.mcps.some(mcp => ['context7', 'obscura', 'memory', 'sequential-thinking'].includes(mcp.id)));
   assert.ok(bootstrap.defaults.mcps.some(mcp => mcp.id === 'gitlab'));
   const config = { apiUrl: 'https://example.org', apiKey: 'private', mcps: [], roles };

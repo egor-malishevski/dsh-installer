@@ -125,7 +125,7 @@ test('клиент Slim: основная модель, роли совета и
   }
   const written = c.planUserOps(base, {}, d).filter((op) => op.path.includes('fallbacks'));
   assert.deepEqual(written, []);
-  assert.deepEqual(c.FALLBACK_ROLE_IDS, ['oracle', 'designer', 'fixer', 'explorer', 'librarian']);
+  assert.deepEqual(c.FALLBACK_ROLE_IDS, ['oracle', 'designer', 'fixer', 'explorer', 'librarian', 'tester']);
 });
 
 test('установщик: запасные маршруты сервера доходят до /api/install без потерь', () => {

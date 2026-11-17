@@ -61,6 +61,7 @@ test('custom / non-alias / wrong provider unchanged, noop', () => {
   roles.fixer = { provider: 'cliproxy', model: 'fallback-oracle' };
   roles.explorer = { model: 'fallback-explorer' };
   roles.librarian = { provider: 'cliproxy', model: 'grok-4.7' };
+  if (roles.tester) roles.tester = { provider: 'cliproxy', model: 'claude-sonnet-5-5' };
   const p = planFallbackMigration(e, GO);
   assert.equal(p.status, 'noop'); assert.deepEqual(p.entries, e); assert.deepEqual(p.actions, []);
 });

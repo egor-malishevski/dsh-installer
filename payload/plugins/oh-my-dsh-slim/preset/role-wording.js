@@ -53,7 +53,7 @@ export function schedulingDescription(continuable) {
 }
 
 export function backgroundSection(toolName) {
-  return `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. After launching background lanes, end your turn with a brief status note — do not poll their state with repeated tool calls; when a run settles, the runtime sends you a notice containing its outcome, which wakes you to reconcile it. Set \`run_in_background: false\` only when the user explicitly asked to wait in place — a foreground run locks this conversation until the child returns and makes the child one-shot (no send_message follow-up, no carried context). For MCP-backed roles (subagent_librarian), foreground runs do not mount MCP docs / gh_grep tools — keep them in the background and follow up with send_message.`;
+  return `Use ${toolName} in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. After launching background lanes, end your turn with a brief status note — do not poll their state with repeated tool calls; when a run settles, the runtime sends you a notice containing its outcome, which wakes you to reconcile it. Set \`run_in_background: false\` only when the user explicitly asked to wait in place — a foreground run locks this conversation until the child returns and makes the child one-shot (no send_message follow-up, no carried context). For MCP-backed roles (subagent_librarian, subagent_tester), foreground runs do not mount their MCP tools — keep them in the background and follow up with send_message.`;
 }
 
 /** Patch only one role definition, preserving the native executable contract. */
