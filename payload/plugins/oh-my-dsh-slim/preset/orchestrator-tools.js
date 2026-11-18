@@ -164,7 +164,8 @@ export async function apply(ctx, config = {}) {
   bindProfileContext(ctx, config.profileId);
   const scope = await hostImport(ctx, '@deepseek-ai/dsh-scope');
   ctx.effect(
-    () => ctx.on('agent/created', ({ agent }) => composeOrchestrator(agent, ctx, scope.scopeOf)),
+    // Lifecycle serial dispatch bails on non-void values; composition status is private.
+    () => ctx.on('agent/created', async ({ agent }) => { await composeOrchestrator(agent, ctx, scope.scopeOf); }),
     'oh-my-dsh-slim: orchestrator tools',
   );
   for (const agent of ctx.agents?.list?.() ?? []) {

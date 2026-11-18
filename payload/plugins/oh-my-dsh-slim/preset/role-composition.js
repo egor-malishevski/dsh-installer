@@ -2,13 +2,10 @@
 //
 // DSH 0.2.1 removed `persona`/`toolFilter` from the subagent tool config and
 // rejected both outright: a child's composition is a preset now, and the tool
-// may only name one. This module replays the two calls the host itself used to
-// make for us (0.2.0 `applyChildComposition`, 0.2.1 `applyChildOverrides`), on
-// the child's own scope, at `agent/created`:
-//
-//   agent.ctx.systemPrompt.section({ name: 'deployment:persona-prefix',
-//                                     order: getSectionOrder('DEPLOYMENT_PERSONA_PREFIX') })
-//   agent.ctx.tools.restrict(filter)
+// may only name one. On the child's own scope at `agent/created`, this module
+// replaces the preset's manager persona during system-prompt/assemble and
+// applies tools.restrict(filter). The named persona is already registered by
+// the child preset; registering it again in that scope is not an override.
 //
 // Identity comes from `subagent/descriptor.label` (written inside the host's
 // setup(), before `agent/created`). The role tool wrapper prefixes the label
@@ -16,10 +13,8 @@
 // resume after a restart. A 0.6.3-created child carries the persona marker
 // instead; roleIdFromEvents() keeps that as a fallback.
 //
-// Failure policy (review G2): a missing/duplicate persona section is cosmetic
-// and fails open; a failed `restrict` is a permission boundary and fails
-// closed — the host's creation announcement rejects, so the delegation fails
-// instead of leaving an unconstrained oracle/explorer running.
+// Failure policy: persona assembly and tool restriction fail closed. A child
+// must not run with manager instructions or an unconstrained tool surface.
 
 import { hostImport } from './bridge.js';
 import { loadConfig, bindProfileContext } from './config.js';
@@ -30,6 +25,16 @@ import {
 
 export const name = 'omds-role-composition';
 export const inject = ['loader'];
+
+/** Replace only deployment identity, never tool grants or required safety context. */
+export function replaceRolePersona(assembly, text) {
+  const persona = assembly.sections.find(section => section.name === 'deployment:persona-prefix');
+  if (!persona) throw new Error('oh-my-dsh-slim: child persona section is missing');
+  assembly.sections = assembly.sections.map(section => section === persona
+    ? { ...section, text, interpolate: false }
+    : section);
+  return assembly;
+}
 
 /** Roles whose composition has already been installed on this exact agent. */
 const applied = new WeakSet();
@@ -67,20 +72,13 @@ export async function composeChild(agent, ctx, scopeOf) {
   applied.add(agent);
 
   const section = composeRolePersona(roleId, ROLE_PERSONAS[roleId], roleConfig.personaAppend, undefined);
-  try {
-    agent.ctx.systemPrompt.section({
-      name: 'deployment:persona-prefix',
-      order: agent.ctx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA_PREFIX'),
-      // The composed persona is literal text (user personaAppend included);
-      // interpolating it would make an unknown {{var}} abort the child turn on
-      // a strict-interpolation host.
-      interpolate: false,
-      text: section,
-    });
-  } catch (error) {
-    // Cosmetic: the child keeps the inherited prompt but stays functional.
-    ctx.logger?.warn?.('oh-my-dsh-slim: role "%s": persona section failed: %s', roleId, String(error?.message ?? error));
-  }
+  // The child's preset already owns this named section in the same scope.
+  // A second section() registration throws rather than replacing it. Replace
+  // only the persona at assembly time; keep safety sections and runtime facts.
+  agent.ctx.on('system-prompt/assemble', async (assembly, _context, next) => {
+    const result = await next();
+    return replaceRolePersona(result ?? assembly, section);
+  }, { prepend: true });
 
   const filter = roleFilter(roleId, roleConfig);
   if (filter === undefined) return 'ok';
@@ -100,8 +98,9 @@ export async function apply(ctx, config = {}) {
   const scope = await hostImport(ctx, '@deepseek-ai/dsh-scope');
   // Return the promise: the host announces `agent/created` through a serial
   // dispatch, and a rejected restrict must reject that announcement so the
-  // delegation fails (fail closed). Only the persona section fails open, and
-  // that catch lives inside composeChild().
-  ctx.effect(() => ctx.on('agent/created', ({ agent }) => composeChild(agent, ctx, scope.scopeOf)),
-    'oh-my-dsh-slim: role composition');
+  // delegation fails (fail closed).
+  // Do not return the private composition status: serial dispatch treats it as a bail.
+  ctx.effect(() => ctx.on('agent/created', async ({ agent }) => {
+    await composeChild(agent, ctx, scope.scopeOf);
+  }), 'oh-my-dsh-slim: role composition');
 }
