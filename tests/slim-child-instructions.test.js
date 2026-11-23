@@ -27,6 +27,12 @@ test('tester persona wires absolute qa-report generator from loaded preset dir',
   assert.match(text, /write every report free-text field in Russian regardless of the user\/task\/UI language/);
   assert.match(text, /Keep schema keys and enums exactly as documented/);
   assert.match(text, /inspect the JSON input and generated HTML for stray English prose/);
+  assert.match(text, /not_checked/);
+  assert.match(text, /readiness/);
+  assert.match(text, /ready_with_reservations/);
+  assert.match(text, /Harness\/runtime\/environment blockers are not product defects/);
+  assert.match(text, /later success must not silently erase prior failure/);
+  assert.match(text, /evidence links \(not embeds\)/);
   assert.doesNotMatch(text, /Write an HTML QA report to the path the Orchestrator requested/);
 });
 
