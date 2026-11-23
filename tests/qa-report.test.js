@@ -10,22 +10,27 @@ const generator = fileURLToPath(new URL('../payload/plugins/oh-my-dsh-slim/prese
 
 function sample(overrides = {}) {
   return {
-    title: 'Login <QA> & "smoke"',
+    title: 'Вход <QA> & "smoke"',
     surface: 'hybrid',
-    summary: "Pass with <script>alert('x')</script>",
-    environment: { browser: 'chromium', device: "iPhone '15'" },
-    requirements: [{ requirement: 'Sign in', status: 'pass', details: 'ok & ready' }],
+    summary: "Пройдено с <script>alert('x')</script>",
+    environment: { Браузер: 'chromium', Устройство: "iPhone '15'" },
+    requirements: [{ requirement: 'Авторизация', status: 'pass', details: 'готово & ок' }],
     scenarios: [{
-      name: 'Happy path',
+      name: 'Успешный вход',
       status: 'pass',
-      steps: ['Open app', "Tap 'Sign in'"],
-      expected: 'Home',
-      actual: 'Home',
-      evidence: [{ label: 'shot', path: 'evidence/shot.png' }],
+      steps: ['Открыть приложение', "Нажать 'Войти'"],
+      expected: 'Главный экран',
+      actual: 'Главный экран',
+      evidence: [{ label: 'снимок', path: 'evidence/shot.png' }],
     }],
-    defects: [],
+    defects: [{
+      title: 'Кнопка не отвечает',
+      severity: 'high',
+      steps: ['Открыть экран входа', 'Нажать Войти'],
+      evidence: [{ label: 'лог', path: 'evidence/shot.png' }],
+    }],
     rerun: ['npx playwright test'],
-    risks: ['flaky network'],
+    risks: ['нестабильная сеть'],
     ...overrides,
   };
 }
@@ -43,18 +48,27 @@ function run(cwd, args) {
   return spawnSync(process.execPath, [generator, ...args], { cwd, encoding: 'utf8' });
 }
 
-test('qa-report writes escaped HTML and refuses overwrite', async t => {
+test('qa-report writes escaped Russian HTML and refuses overwrite', async t => {
   const dir = await workspace(t);
   await writeFile(join(dir, 'data.json'), JSON.stringify(sample()));
   const first = run(dir, ['data.json', 'out/report.html']);
   assert.equal(first.status, 0, first.stderr);
   assert.match(first.stdout, /Report written: out\/report\.html/);
   const html = await readFile(join(dir, 'out/report.html'), 'utf8');
-  assert.match(html, /Login &lt;QA&gt; &amp; &quot;smoke&quot;/);
-  assert.match(html, /Pass with &lt;script&gt;alert\(&#39;x&#39;\)&lt;\/script&gt;/);
+  assert.match(html, /lang="ru"/);
+  assert.match(html, /Гибридное приложение/);
+  assert.match(html, /Вход &lt;QA&gt; &amp; &quot;smoke&quot;/);
+  assert.match(html, /Пройдено с &lt;script&gt;alert\(&#39;x&#39;\)&lt;\/script&gt;/);
   assert.match(html, /iPhone &#39;15&#39;/);
-  assert.match(html, /hybrid/);
+  assert.match(html, /Окружение/);
+  assert.match(html, /Итоги/);
+  assert.match(html, /Требования/);
+  assert.match(html, /Сценарии/);
+  assert.match(html, /Дефекты/);
+  assert.match(html, /Пройдено/);
+  assert.match(html, /Серьёзность: Высокая/);
   assert.doesNotMatch(html, /<script>alert\('x'\)<\/script>/);
+  assert.doesNotMatch(html, />hybrid</);
   const second = run(dir, ['data.json', 'out/report.html']);
   assert.notEqual(second.status, 0);
   assert.match(second.stderr, /qa-report:/);

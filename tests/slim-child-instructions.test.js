@@ -24,6 +24,9 @@ test('tester persona wires absolute qa-report generator from loaded preset dir',
   assert.match(text, /do not author your own markup/);
   assert.match(text, /CLI refuses overwrite/);
   assert.match(text, /Report renderer errors\/blockers \(including overwrite refusal\) instead of hand-writing HTML/);
+  assert.match(text, /write every report free-text field in Russian regardless of the user\/task\/UI language/);
+  assert.match(text, /Keep schema keys and enums exactly as documented/);
+  assert.match(text, /inspect the JSON input and generated HTML for stray English prose/);
   assert.doesNotMatch(text, /Write an HTML QA report to the path the Orchestrator requested/);
 });
 

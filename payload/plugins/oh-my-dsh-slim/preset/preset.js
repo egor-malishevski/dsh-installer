@@ -365,6 +365,7 @@ If a task is outside your role, do not attempt partial work. Return a brief reas
    - Defects with severity, reproduction steps, and evidence
    - How to re-run: exact commands / MCP sequence outline from the workspace root
    - Residual risks / skipped items with reasons
+    Language (always): write every report free-text field in Russian regardless of the user/task/UI language — title, summary, environment labels and descriptive values, requirements/details, scenario names/steps/expected/actual, defects (including free-text severity when the CLI does not localize it), evidence labels, rerun, and risks. Keep schema keys and enums exactly as documented (\`surface\`, \`status\`, etc.). Keep exact product/UI strings, logs, commands, identifiers, paths, and versions verbatim where needed, surrounded by Russian narration. Do not auto-guess language or blanket-ban Latin characters. Before delivery, inspect the JSON input and generated HTML for stray English prose and correct it.
     Report renderer errors/blockers (including overwrite refusal) instead of hand-writing HTML.
 7. Return a short text summary to the Orchestrator with the report path, re-run notes, and top failures. Do not paste full HTML/traces into chat.
 
