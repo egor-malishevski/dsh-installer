@@ -1,7 +1,7 @@
 // sandbox-role-grants.js — role-scoped Seatbelt write grants for workspace-write.
 //
 // Host Seatbelt profiles under workspace-write only allow the workspace root and
-// a temp area. Maestro/applesimutils also need to write simulator device data
+// a temp area. Simulator helpers / agent-device also need to write device data
 // under ~/Library/Developer/CoreSimulator/Devices/<UDID>/data. This plugin wraps
 // ctx.sandbox.confine (host scope) and, for named roles only, appends fixed SBPL
 // allow forms after the existing profile string (last matching rule wins).

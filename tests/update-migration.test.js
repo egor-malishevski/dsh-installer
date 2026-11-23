@@ -142,7 +142,7 @@ test('HTTP /api/update forwards migrateNativeFallbacks and rejects non-boolean',
   assert.equal((await stale.json()).code, 'STALE_PLAN');
 });
 
-test('update backfills missing tester role and merges scout tools non-destructively', async t => {
+test('update backfills missing tester role and merges agent-device tools non-destructively', async t => {
   const home = await fixture(t);
   const preview = await updateProfile({ home, ...base });
   assert.ok(preview.actions.some(a => (a.details || []).includes('TESTER_ROLE_ADDED')));
@@ -159,10 +159,16 @@ test('update backfills missing tester role and merges scout tools non-destructiv
     'mcp__confluence__confluence_get_page',
     'mcp__agent-device__devices',
     'mcp__agent-device__find',
+    'mcp__agent-device__press',
   ]) assert.ok(tester.sharedMcpTools.includes(tool), tool);
+  for (const denied of [
+    'mcp__agent-device__install',
+    'mcp__agent-device__settings',
+    'mcp__agent-device__batch',
+  ]) assert.ok(!tester.sharedMcpTools.includes(denied), denied);
   // Existing custom grants on other roles stay verbatim.
   for (const r of roleNames) assert.deepEqual(slim.config.roles[r].sharedMcpTools, ['mcp__x__y']);
-  // Second pass merges without wiping a custom scout grant already present.
+  // Second pass merges without wiping a custom grant already present.
   const rows = await readPatch(home);
   rows.find(r => r.id === 'oh-my-dsh-slim').config.roles.tester.sharedMcpTools = ['mcp__custom__keep', 'mcp__agent-device__devices'];
   await writeFile(join(home, '.dsh/profiles/desktop/cordis.patch.yml'), JSON.stringify(rows));
@@ -171,5 +177,6 @@ test('update backfills missing tester role and merges scout tools non-destructiv
   const tester2 = (await readPatch(home)).find(r => r.id === 'oh-my-dsh-slim').config.roles.tester;
   assert.ok(tester2.sharedMcpTools.includes('mcp__custom__keep'));
   assert.ok(tester2.sharedMcpTools.includes('mcp__agent-device__boot'));
+  assert.ok(tester2.sharedMcpTools.includes('mcp__agent-device__press'));
   assert.equal(tester2.sharedMcpTools.filter(x => x === 'mcp__agent-device__devices').length, 1);
 });

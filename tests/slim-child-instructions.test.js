@@ -1,16 +1,56 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { realpathSync } from 'node:fs';
 import { apply, composeChild, replaceRolePersona } from '../payload/plugins/oh-my-dsh-slim/preset/role-composition.js';
-import { ROLE_PERSONAS } from '../payload/plugins/oh-my-dsh-slim/preset/preset.js';
+import { ROLE_PERSONAS, shellQuoteForBashTool } from '../payload/plugins/oh-my-dsh-slim/preset/preset.js';
 import { apply as applyOrchestrator } from '../payload/plugins/oh-my-dsh-slim/preset/orchestrator-tools.js';
 import { effectiveRoleFilter } from '../payload/plugins/oh-my-dsh-slim/preset/roles.js';
 import { loadConfig, TOOL_NAMES } from '../payload/plugins/oh-my-dsh-slim/preset/config.js';
 
 const roles = ['explorer', 'librarian', 'oracle', 'designer', 'fixer', 'tester'];
 const manager = 'You are a workflow manager. Keep your own tool use to orchestration:';
+
+test('tester persona wires absolute qa-report generator from loaded preset dir', () => {
+  const expected = fileURLToPath(new URL('../payload/plugins/oh-my-dsh-slim/preset/qa-report.mjs', import.meta.url));
+  const quoted = shellQuoteForBashTool(expected);
+  const text = ROLE_PERSONAS.tester;
+  assert.equal(quoted[0], "'", 'Bash-tool path must be single-quoted, not JSON double-quoted');
+  assert.ok(text.includes(`node ${quoted}`), `missing absolute generator CLI node ${quoted}`);
+  assert.ok(text.includes(`node ${quoted} --help`), 'missing --help schema instruction');
+  assert.doesNotMatch(text, /JSON\.stringify\(QA_REPORT_GENERATOR\)/);
+  assert.doesNotMatch(text, /node "[^"]*qa-report\.mjs"/);
+  assert.match(text, /do not author your own markup/);
+  assert.match(text, /CLI refuses overwrite/);
+  assert.match(text, /Report renderer errors\/blockers \(including overwrite refusal\) instead of hand-writing HTML/);
+  assert.doesNotMatch(text, /Write an HTML QA report to the path the Orchestrator requested/);
+});
+
+test('shellQuoteForBashTool is literal for $, backtick, and apostrophe paths', () => {
+  const samples = [
+    "/tmp/qa$report.mjs",
+    "/tmp/qa`report.mjs",
+    "/tmp/qa'report.mjs",
+    "/tmp/qa $`'.mjs",
+  ];
+  for (const sample of samples) {
+    const quoted = shellQuoteForBashTool(sample);
+    assert.equal(quoted[0], "'");
+    assert.equal(quoted.at(-1), "'");
+    assert.doesNotMatch(quoted, /^"/);
+    if (process.platform === 'win32') {
+      assert.equal(quoted, "'" + sample.replace(/'/g, "''") + "'");
+    } else {
+      assert.equal(quoted, "'" + sample.replace(/'/g, "'\\''") + "'");
+      // single-quoted POSIX literals keep $ / backticks as literal characters
+      if (sample.includes('$')) assert.match(quoted, /\$/);
+      if (sample.includes('`')) assert.match(quoted, /`/);
+      if (sample.includes("'")) assert.ok(quoted.includes("'\\''"));
+    }
+  }
+});
+
 function assembly() {
   return {
     sections: [{ name: 'deployment:persona-prefix', text: manager }, { name: 'plan-policy', text: 'Do not mutate in plan mode.' }],

@@ -91,7 +91,7 @@ export const ROLE_TABLE = Object.freeze({
     roleId: 'tester',
     toolName: 'subagent_tester',
     title: 'tester',
-    description: "QA specialist for mobile and web. Writes durable Maestro/Playwright tests, runs them via CLI, uses agent-device only for mobile scout/debug, and returns an HTML report with screenshots, failures, and reproduction steps.",
+    description: "QA specialist for mobile and web. Runs native mobile QA via agent-device MCP (minimal interactions), Playwright for web, and returns an HTML report with screenshots, failures, and reproduction steps.",
   }),
   observer: Object.freeze({
     roleId: 'observer',

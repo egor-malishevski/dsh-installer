@@ -61,7 +61,7 @@ test('filters grants and rejects unsafe URLs and paths', () => {
   assert.throws(() => generateMcps({ mcps: [{ id: 'figma', values: {} }] }, options));
 });
 
-test('agent-device is optional: scout grants without CLI, server row when CLI provided', () => {
+test('agent-device is optional: tester grants without CLI, server row when CLI provided', () => {
   const missing = generateMcps({ mcps: [{ id: 'agent-device', values: {} }] }, { targetHome: '/home/a', agentDeviceCli: null });
   assert.equal(missing.rows.length, 0);
   assert.ok(missing.requirements.some(r => r.includes('agent-device CLI not found')));
@@ -74,7 +74,22 @@ test('agent-device is optional: scout grants without CLI, server row when CLI pr
     'mcp__agent-device__logs',
     'mcp__agent-device__appstate',
     'mcp__agent-device__find',
+    'mcp__agent-device__apps',
+    'mcp__agent-device__press',
+    'mcp__agent-device__fill',
+    'mcp__agent-device__type',
+    'mcp__agent-device__get',
+    'mcp__agent-device__is',
+    'mcp__agent-device__wait',
+    'mcp__agent-device__close',
+    'mcp__agent-device__scroll',
+    'mcp__agent-device__back',
+    'mcp__agent-device__alert',
+    'mcp__agent-device__keyboard',
   ]);
+  assert.ok(!missing.sharedMcpTools.tester.includes('mcp__agent-device__install'));
+  assert.ok(!missing.sharedMcpTools.tester.includes('mcp__agent-device__settings'));
+  assert.ok(!missing.sharedMcpTools.tester.includes('mcp__agent-device__batch'));
   const cli = '/usr/local/lib/node_modules/agent-device/bin/agent-device.mjs';
   const present = generateMcps({ mcps: [{ id: 'agent-device', values: {} }] }, { targetHome: '/home/a', agentDeviceCli: cli, workspaceDir: '/home/a/ws' });
   assert.equal(present.rows.length, 1);

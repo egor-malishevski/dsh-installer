@@ -380,8 +380,8 @@ Additional limits:
   Legitimate top-level escalation remains subject to host approval; this is a preset workaround,
   not an upstream permission-model change.
 - `sandbox-role-grants` (host scope) appends named Seatbelt write forms for configured specialist
-  roles under `workspace-write`. The tester default includes `coresim-device-data` so Maestro /
-  applesimutils can write `~/Library/Developer/CoreSimulator/Devices/<UDID>/data` without
+  roles under `workspace-write`. The tester default includes `coresim-device-data` so
+  simulator helpers / agent-device can write `~/Library/Developer/CoreSimulator/Devices/<UDID>/data` without
   widening to full CoreSimulator or danger-full-access. Unknown sessions/roles fail closed.
 - `early-close-context` supplies running/reported/settled facts and delegation reminders. It
   cannot force the model to wait or guarantee model compliance.
