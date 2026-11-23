@@ -206,6 +206,55 @@ test('qa-report rejects malformed readiness and unknown status', async t => {
   assert.match(badSurface.result.stderr, /scenarios\[0\]\.surface is invalid/);
 });
 
+test('qa-report previews spaced uppercase raster and keeps non-images as links', async t => {
+  const dir = await workspace(t);
+  await writeFile(join(dir, 'evidence', 'Shot Board.PNG'), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  await writeFile(join(dir, 'evidence', 'trace.log'), 'line\n');
+  await writeFile(join(dir, 'evidence', 'bundle.zip'), Buffer.from([0x50, 0x4b, 0x05, 0x06, ...Buffer.alloc(18)]));
+  const rasterPath = 'evidence/Shot Board.PNG';
+  const encoded = '../evidence/Shot%20Board.PNG';
+  const data = sample({
+    scenarios: [{
+      name: 'Успешный вход',
+      status: 'pass',
+      steps: ['Открыть приложение'],
+      expected: 'Главный экран',
+      actual: 'Главный экран',
+      evidence: [
+        { label: 'снимок <A> & "ok"', path: rasterPath },
+        { label: 'лог', path: 'evidence/trace.log' },
+      ],
+    }],
+    defects: [{
+      title: 'Кнопка не отвечает',
+      severity: 'high',
+      steps: ['Нажать Войти'],
+      evidence: [
+        { label: 'снимок <A> & "ok"', path: rasterPath },
+        { label: 'архив', path: 'evidence/bundle.zip' },
+      ],
+    }],
+  });
+  const { result, html } = await render(dir, data, 'out/preview.html');
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(html);
+  assert.match(html, new RegExp(`href="${encoded.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}"`));
+  assert.match(html, new RegExp(`src="${encoded.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}"`));
+  assert.equal((html.match(new RegExp(`src="${encoded.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}"`, 'g')) || []).length, 2);
+  assert.match(html, /снимок &lt;A&gt; &amp; &quot;ok&quot;/);
+  assert.match(html, /class="evidence-preview"/);
+  assert.doesNotMatch(html, /data:/);
+  assert.match(html, /href="\.\.\/evidence\/trace\.log"/);
+  assert.match(html, /href="\.\.\/evidence\/bundle\.zip"/);
+  assert.doesNotMatch(html, /src="\.\.\/evidence\/trace\.log"/);
+  assert.doesNotMatch(html, /src="\.\.\/evidence\/bundle\.zip"/);
+  const passCard = html.match(/Успешный вход[\s\S]*?<\/article>/);
+  assert.ok(passCard);
+  assert.match(passCard[0], /<details>[\s\S]*Подробности сценария/);
+  assert.match(passCard[0], /Материалы[\s\S]*Shot%20Board\.PNG/);
+  assert.ok(passCard[0].indexOf('Материалы') > passCard[0].indexOf('</details>'), 'pass evidence stays outside collapsed details');
+});
+
 test('qa-report --help prints schema without writing files', async t => {
   const dir = await workspace(t);
   const help = run(dir, ['--help']);

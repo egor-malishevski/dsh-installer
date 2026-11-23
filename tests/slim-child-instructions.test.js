@@ -32,7 +32,9 @@ test('tester persona wires absolute qa-report generator from loaded preset dir',
   assert.match(text, /ready_with_reservations/);
   assert.match(text, /Harness\/runtime\/environment blockers are not product defects/);
   assert.match(text, /later success must not silently erase prior failure/);
-  assert.match(text, /evidence links \(not embeds\)/);
+  assert.match(text, /automatic inline previews in Материалы/);
+  assert.match(text, /no binary embedding/);
+  assert.doesNotMatch(text, /evidence links \(not embeds\)/);
   assert.doesNotMatch(text, /Write an HTML QA report to the path the Orchestrator requested/);
 });
 

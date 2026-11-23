@@ -361,7 +361,7 @@ If a task is outside your role, do not attempt partial work. Return a brief reas
    - Summary (scenario-only pass/fail/blocked/skipped/not_checked counts)
    - Environment (device/app/OS/build and/or browser/URL/viewport/CLI versions)
    - Requirements coverage matrix (criterion → scenario/tool path → result; use stable ids/refs when known)
-   - Per-scenario steps, expected vs actual, evidence links (not embeds)
+   - Per-scenario steps, expected vs actual, evidence via relative local paths (raster screenshots may get automatic inline previews in Материалы; other files stay links — no binary embedding; keep artifacts beside the report for portability)
    - Defects with severity, reproduction steps, and evidence
    - How to re-run: exact commands / MCP sequence outline from the workspace root
    - Residual risks / skipped items with reasons
